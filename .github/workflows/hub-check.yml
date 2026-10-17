@@ -1,0 +1,47 @@
+name: Plugin Hub check
+
+# Runs RuneLite's own Plugin Hub packager against this commit, the same build the
+# Hub runs on a submission, so problems show up here before the Hub sees them.
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hub:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: runelite/plugin-hub
+          fetch-depth: 0
+          path: plugin-hub
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: adopt
+          java-version: 11
+      - name: Add entry
+        working-directory: plugin-hub
+        run: |
+          printf 'repository=https://github.com/%s.git\ncommit=%s\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA" > plugins/codex-ledger
+          cat plugins/codex-ledger
+          git -c user.name=ci -c user.email=ci@example.com add plugins/codex-ledger
+          git -c user.name=ci -c user.email=ci@example.com commit -qm "Add Codex Ledger"
+          echo "BEFORE=$(git rev-parse HEAD~1)" >> "$GITHUB_ENV"
+          echo "AFTER=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Fetch packager
+        run: |
+          curl --location --fail --retry 4 --max-time 30 --output bundle.tar.zst https://github.com/runelite/plugin-hub-tooling/releases/download/v5/bundle.tar.zst
+          tar xf bundle.tar.zst
+      - name: Prepare
+        run: ./prepare.sh
+      - name: Build
+        env:
+          PACKAGE_IS_PR: true
+        run: |
+          export PACKAGE_COMMIT_RANGE="$BEFORE...$AFTER"
+          java -XX:+UseParallelGC -cp package.jar net.runelite.pluginhub.packager.Packager
