@@ -2,6 +2,7 @@ package com.codex.ledger;
 
 import com.codex.ledger.core.Day;
 import com.codex.ledger.core.Ledger;
+import com.codex.ledger.core.Offer;
 import com.codex.ledger.core.Report;
 import com.codex.ledger.core.Store;
 import com.codex.ledger.overlay.WorthPlaque;
@@ -22,6 +23,8 @@ import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
+import net.runelite.api.EnumComposition;
+import net.runelite.api.EnumID;
 import net.runelite.api.GameState;
 import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.GrandExchangeOfferState;
@@ -32,8 +35,12 @@ import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.GrandExchangeOfferChanged;
 import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.events.VarbitChanged;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.ItemID;
+import net.runelite.api.gameval.VarbitID;
+import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.chat.ChatColorType;
 import net.runelite.client.chat.ChatMessageBuilder;
@@ -64,11 +71,29 @@ public class CodexLedgerPlugin extends Plugin
 	private static final String LEDGER_KEY = "ledger";
 	/** Ticks between revaluing what is held, about a minute. */
 	private static final int REVALUE_TICKS = 100;
-	/** Ticks between saves while something has changed. */
-	private static final int SAVE_TICKS = 50;
-	/** Ticks after login before the summary, so the exchange offers have arrived. */
+	/**
+	 * Ticks between saves while something has changed, about five minutes. The ledger is also saved
+	 * on logout, on a profile switch and when the plugin stops, so little is ever at risk.
+	 */
+	private static final int SAVE_TICKS = 500;
+	/** Ticks between refreshing the panel and plaque while the ledger keeps changing. */
+	private static final int PUBLISH_TICKS = 3;
+	/**
+	 * Ticks after login before anything is counted, so the exchange offers and the rune pouch have
+	 * arrived and are counted in the same breath as the inventory they may have gone into.
+	 */
+	private static final int SYNC_TICKS = 3;
+	/** Ticks after login before the summary. */
 	private static final int SUMMARY_TICKS = 8;
 	private static final int GE_SLOTS = 8;
+	private static final int[] POUCH_RUNES = {
+		VarbitID.RUNE_POUCH_TYPE_1, VarbitID.RUNE_POUCH_TYPE_2, VarbitID.RUNE_POUCH_TYPE_3,
+		VarbitID.RUNE_POUCH_TYPE_4, VarbitID.RUNE_POUCH_TYPE_5, VarbitID.RUNE_POUCH_TYPE_6
+	};
+	private static final int[] POUCH_AMOUNTS = {
+		VarbitID.RUNE_POUCH_QUANTITY_1, VarbitID.RUNE_POUCH_QUANTITY_2, VarbitID.RUNE_POUCH_QUANTITY_3,
+		VarbitID.RUNE_POUCH_QUANTITY_4, VarbitID.RUNE_POUCH_QUANTITY_5, VarbitID.RUNE_POUCH_QUANTITY_6
+	};
 
 	@Inject
 	private Client client;
@@ -99,8 +124,6 @@ public class CodexLedgerPlugin extends Plugin
 
 	private final WorthPlaque plaque = new WorthPlaque();
 	private final Map<Integer, String> names = new HashMap<>();
-	@SuppressWarnings("unchecked")
-	private final Map<Integer, Long>[] exchange = new Map[GE_SLOTS];
 
 	private LedgerPanel panel;
 	private NavigationButton navButton;
@@ -112,6 +135,12 @@ public class CodexLedgerPlugin extends Plugin
 	private int ticks;
 	private int loggedInTicks = -1;
 	private long worthAtLogin = -1;
+	/** True once the offers and rune pouch have been read since login; nothing is settled before. */
+	private boolean synced;
+	private boolean pouchChanged;
+	/** Set at the login screen, so the summary is written once a login and not again after a world hop. */
+	private boolean fromLoginScreen;
+	private boolean summaryDue;
 
 	@Provides
 	CodexLedgerConfig provideConfig(ConfigManager configManager)
@@ -143,7 +172,7 @@ public class CodexLedgerPlugin extends Plugin
 			loadProfile();
 			if (client.getGameState() == GameState.LOGGED_IN)
 			{
-				loggedInTicks = 0;
+				loggedInTicks = SYNC_TICKS;
 				observeAll();
 			}
 			publish();
@@ -161,7 +190,8 @@ public class CodexLedgerPlugin extends Plugin
 			ledger = null;
 			profile = null;
 			names.clear();
-			clearExchange();
+			synced = false;
+			loggedInTicks = -1;
 		});
 		panel = null;
 	}
@@ -175,16 +205,27 @@ public class CodexLedgerPlugin extends Plugin
 			if (loggedInTicks < 0)
 			{
 				loggedInTicks = 0;
+			}
+			if (fromLoginScreen)
+			{
+				fromLoginScreen = false;
+				summaryDue = true;
 				worthAtLogin = ledger != null && ledger.isReady() ? ledger.getTotal() : -1;
 			}
 		}
-		else if (state == GameState.LOGIN_SCREEN)
+		else if (state == GameState.LOGIN_SCREEN || state == GameState.HOPPING || state == GameState.CONNECTION_LOST)
 		{
+			// The client forgets the offers while away; they are read afresh after logging back in.
 			loggedInTicks = -1;
-			clearExchange();
-			save();
-			dirty = true;
-			publish();
+			synced = false;
+			if (state == GameState.LOGIN_SCREEN)
+			{
+				fromLoginScreen = true;
+				summaryDue = false;
+				save();
+				dirty = true;
+				publish();
+			}
 		}
 	}
 
@@ -193,9 +234,9 @@ public class CodexLedgerPlugin extends Plugin
 	{
 		save();
 		loadProfile();
-		clearExchange();
 		worthAtLogin = ledger != null && ledger.isReady() ? ledger.getTotal() : -1;
-		if (client.getGameState() == GameState.LOGGED_IN)
+		synced = false;
+		if (client.getGameState() == GameState.LOGGED_IN && loggedInTicks >= SYNC_TICKS)
 		{
 			observeAll();
 		}
@@ -228,24 +269,26 @@ public class CodexLedgerPlugin extends Plugin
 	@Subscribe
 	public void onGrandExchangeOfferChanged(GrandExchangeOfferChanged event)
 	{
-		GrandExchangeOffer offer = event.getOffer();
 		int slot = event.getSlot();
-		if (ledger == null || slot < 0 || slot >= GE_SLOTS
-			|| (offer.getState() == GrandExchangeOfferState.EMPTY && client.getGameState() != GameState.LOGGED_IN))
+		if (ledger == null || !synced || slot < 0 || slot >= GE_SLOTS || client.getGameState() != GameState.LOGGED_IN)
 		{
-			// The client clears every offer while logging in and hopping; those are not real.
+			// Until the offers are read whole after login, a single slot could look like a collection.
 			return;
 		}
-		exchange[slot] = offerContents(offer);
-		Map<Integer, Long> all = new HashMap<>();
-		for (Map<Integer, Long> s : exchange)
+		ledger.offer(slot, offer(event.getOffer()));
+	}
+
+	@Subscribe
+	public void onVarbitChanged(VarbitChanged event)
+	{
+		for (int varbit : POUCH_RUNES)
 		{
-			if (s != null)
-			{
-				s.forEach((id, q) -> all.merge(id, q, Long::sum));
-			}
+			pouchChanged |= event.getVarbitId() == varbit;
 		}
-		ledger.observe(Store.GRAND_EXCHANGE, all);
+		for (int varbit : POUCH_AMOUNTS)
+		{
+			pouchChanged |= event.getVarbitId() == varbit;
+		}
 	}
 
 	@Subscribe
@@ -260,10 +303,24 @@ public class CodexLedgerPlugin extends Plugin
 		{
 			loggedInTicks++;
 		}
+		if (!synced)
+		{
+			if (loggedInTicks < SYNC_TICKS)
+			{
+				return;
+			}
+			observeAll();
+		}
+		if (pouchChanged)
+		{
+			pouchChanged = false;
+			ledger.observe(Store.RUNE_POUCH, runePouch());
+		}
 		if (!pricesReady())
 		{
 			return;
 		}
+		ledger.setAtExchange(atExchange());
 		if (ledger.hasPending() || ticks % REVALUE_TICKS == 0)
 		{
 			if (ledger.settle(System.currentTimeMillis(), itemManager::getItemPrice, ZoneId.systemDefault()))
@@ -272,15 +329,16 @@ public class CodexLedgerPlugin extends Plugin
 				unsaved = true;
 			}
 		}
-		if (loggedInTicks == SUMMARY_TICKS)
+		if (summaryDue && loggedInTicks >= SUMMARY_TICKS)
 		{
+			summaryDue = false;
 			summary();
 		}
 		if (unsaved && ticks % SAVE_TICKS == 0)
 		{
 			save();
 		}
-		if (dirty && ticks % 2 == 0 || ticks % REVALUE_TICKS == 1)
+		if (dirty && ticks % PUBLISH_TICKS == 0 || ticks % REVALUE_TICKS == 1)
 		{
 			publish();
 		}
@@ -329,43 +387,68 @@ public class CodexLedgerPlugin extends Plugin
 		return items;
 	}
 
-	/** What an offer holds right now: the items it has bought or has left to sell, and the coins in it. */
-	private static Map<Integer, Long> offerContents(GrandExchangeOffer offer)
+	/** An offer as the ledger keeps it, or null for an empty slot. */
+	private static Offer offer(GrandExchangeOffer offer)
 	{
-		Map<Integer, Long> items = new HashMap<>();
-		long coins;
-		long held;
+		if (offer == null)
+		{
+			return null;
+		}
 		switch (offer.getState())
 		{
 			case BUYING:
 			case BOUGHT:
 			case CANCELLED_BUY:
-				held = offer.getQuantitySold();
-				coins = offer.getPrice() * offer.getTotalQuantity() - offer.getSpent();
-				break;
+				return new Offer(offer.getItemId(), true, offer.getTotalQuantity(), offer.getPrice(), offer.getQuantitySold(),
+					offer.getSpent(), offer.getState() == GrandExchangeOfferState.BUYING);
 			case SELLING:
 			case SOLD:
 			case CANCELLED_SELL:
-				held = offer.getTotalQuantity() - offer.getQuantitySold();
-				coins = offer.getSpent();
-				break;
+				return new Offer(offer.getItemId(), false, offer.getTotalQuantity(), offer.getPrice(), offer.getQuantitySold(),
+					offer.getSpent(), offer.getState() == GrandExchangeOfferState.SELLING);
 			default:
-				return items;
+				return null;
 		}
-		if (held > 0)
-		{
-			items.put(offer.getItemId(), held);
-		}
-		if (coins > 0)
-		{
-			items.merge(ItemID.COINS, coins, Long::sum);
-		}
-		return items;
 	}
 
-	/** Reads every place the client already has, for when the plugin starts with the player logged in. */
+	/** The runes in the rune pouch, read from the varbits the game keeps them in whether the pouch is carried or not. */
+	private Map<Integer, Long> runePouch()
+	{
+		Map<Integer, Long> runes = new HashMap<>();
+		EnumComposition ids = client.getEnum(EnumID.RUNEPOUCH_RUNE);
+		for (int i = 0; i < POUCH_RUNES.length; i++)
+		{
+			int rune = client.getVarbitValue(POUCH_RUNES[i]);
+			int amount = client.getVarbitValue(POUCH_AMOUNTS[i]);
+			int itemId = rune > 0 && ids != null ? ids.getIntValue(rune) : -1;
+			if (itemId > 0 && amount > 0)
+			{
+				runes.merge(itemId, (long) amount, Long::sum);
+			}
+		}
+		return runes;
+	}
+
+	/** True while the Grand Exchange or a bank's collection box is open, where offers are collected. */
+	private boolean atExchange()
+	{
+		return visible(InterfaceID.GeOffers.UNIVERSE) || visible(InterfaceID.GeCollect.UNIVERSE);
+	}
+
+	private boolean visible(int component)
+	{
+		Widget widget = client.getWidget(component);
+		return widget != null && !widget.isHidden();
+	}
+
+	/**
+	 * Reads every place the client already has, all at once: after login once the offers have
+	 * arrived, and when the plugin starts with the player logged in.
+	 */
 	private void observeAll()
 	{
+		synced = true;
+		pouchChanged = false;
 		for (int id : new int[]{InventoryID.INV, InventoryID.WORN, InventoryID.BANK, InventoryID.SEED_VAULT, InventoryID.LOOTING_BAG})
 		{
 			ItemContainer container = client.getItemContainer(id);
@@ -374,27 +457,11 @@ public class CodexLedgerPlugin extends Plugin
 				ledger.observe(store(id), contents(container));
 			}
 		}
+		ledger.observe(Store.RUNE_POUCH, runePouch());
 		GrandExchangeOffer[] offers = client.getGrandExchangeOffers();
-		if (offers != null)
-		{
-			Map<Integer, Long> all = new HashMap<>();
-			for (int i = 0; i < offers.length && i < GE_SLOTS; i++)
-			{
-				if (offers[i] != null)
-				{
-					exchange[i] = offerContents(offers[i]);
-					exchange[i].forEach((id, q) -> all.merge(id, q, Long::sum));
-				}
-			}
-			ledger.observe(Store.GRAND_EXCHANGE, all);
-		}
-	}
-
-	private void clearExchange()
-	{
 		for (int i = 0; i < GE_SLOTS; i++)
 		{
-			exchange[i] = null;
+			ledger.offer(i, offers != null && i < offers.length ? offer(offers[i]) : null);
 		}
 	}
 
@@ -481,6 +548,10 @@ public class CodexLedgerPlugin extends Plugin
 		for (int id : copy.holdings().keySet())
 		{
 			name(id);
+		}
+		for (Offer offer : copy.getOffers().values())
+		{
+			name(offer.getItem());
 		}
 		for (Day day : copy.getDays())
 		{
