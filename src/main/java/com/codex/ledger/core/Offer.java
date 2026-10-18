@@ -25,9 +25,9 @@ public final class Offer
 	private int done;
 	private long spent;
 	private boolean active;
-	/** Items already collected from a buy that is still trading. */
+	/** Items already collected from the slot while it still holds the offer. */
 	private long taken;
-	/** Coins already collected from a sale that is still trading. */
+	/** Coins already collected from the slot while it still holds the offer. */
 	private long takenCoins;
 
 	public Offer()
@@ -59,7 +59,7 @@ public final class Offer
 	/** Carries over what was already collected from the earlier sighting of the same offer. */
 	void carry(Offer earlier)
 	{
-		taken = Math.min(earlier.taken, done);
+		taken = Math.min(earlier.taken, buy ? done : (long) total - done);
 		takenCoins = earlier.takenCoins;
 	}
 
@@ -87,11 +87,11 @@ public final class Offer
 		if (buy)
 		{
 			held = done - taken;
-			coins = price * total - spent;
+			coins = price * total - spent - takenCoins;
 		}
 		else
 		{
-			held = (long) total - done;
+			held = (long) total - done - taken;
 			coins = spent - tax(item, done, spent) - takenCoins;
 		}
 		if (held > 0)
@@ -106,40 +106,45 @@ public final class Offer
 	}
 
 	/**
-	 * Takes what was just collected into the inventory from a slot that is still trading: bought
-	 * items from a buy, coins from a sale. The quantities taken are removed from {@code gains}.
+	 * Takes what was just collected into the inventory from a slot that still holds its offer:
+	 * bought items and the change from a buy (and, once it has stopped, the coins it never spent),
+	 * coins from a sale (and, once it has stopped, the items it never sold). The quantities taken
+	 * are removed from {@code gains}.
 	 *
 	 * @return true when anything was taken
 	 */
 	boolean collect(Map<Integer, Long> gains)
 	{
-		if (!active)
-		{
-			return false;
-		}
-		int id = buy ? item : Ledger.COINS;
-		long gain = gains.getOrDefault(id, 0L);
-		long here = contents().getOrDefault(id, 0L);
+		long items;
+		long coins;
 		if (buy)
 		{
-			// The coins in a buy are still bidding and cannot be collected yet.
-			here = done - taken;
-		}
-		long take = Math.min(gain, here);
-		if (take <= 0)
-		{
-			return false;
-		}
-		if (buy)
-		{
-			taken += take;
+			items = done - taken;
+			// While it is still bidding only the change on what was bought can be collected.
+			coins = (active ? price * done : price * total) - spent - takenCoins;
 		}
 		else
 		{
-			takenCoins += take;
+			items = active ? 0 : (long) total - done - taken;
+			coins = spent - tax(item, done, spent) - takenCoins;
+		}
+		long tookItems = take(gains, item, items);
+		taken += tookItems;
+		long tookCoins = take(gains, Ledger.COINS, coins);
+		takenCoins += tookCoins;
+		return tookItems > 0 || tookCoins > 0;
+	}
+
+	private static long take(Map<Integer, Long> gains, int id, long available)
+	{
+		long gain = gains.getOrDefault(id, 0L);
+		long take = Math.min(gain, available);
+		if (take <= 0)
+		{
+			return 0;
 		}
 		gains.put(id, gain - take);
-		return true;
+		return take;
 	}
 
 	public int getItem()

@@ -293,6 +293,71 @@ public class LedgerTest
 	}
 
 	@Test
+	public void collectingOnlyTheItemsOfAFinishedOfferIsNotCountedTwice()
+	{
+		open();
+		// Bid 1,000 each for 100 sharks; they all trade at 800, leaving 20k refund in the slot.
+		ledger.observe(Store.BANK, items(WHIP, 1, COINS, 900_000));
+		ledger.offer(0, buy(SHARK, 100, 1_000, 100, 80_000, false));
+		ledger.settle(T0 + 1000, prices, UTC);
+		long worth = ledger.getTotal();
+
+		// Take just the sharks; the refund stays in the slot.
+		ledger.setAtExchange(true);
+		ledger.observe(Store.INVENTORY, items(SHARK, 110));
+		ledger.settle(T0 + 2000, prices, UTC);
+		assertEquals(worth, ledger.getTotal());
+
+		// Then the coins, which empties the slot.
+		ledger.offer(0, null);
+		ledger.observe(Store.INVENTORY, items(SHARK, 110, COINS, 20_000));
+		ledger.settle(T0 + 3000, prices, UTC);
+		assertEquals(worth, ledger.getTotal());
+		assertEquals(0, bank(SHARK));
+	}
+
+	@Test
+	public void collectingTheItemsBackFromACancelledSaleIsNotCountedTwice()
+	{
+		open();
+		ledger.observe(Store.INVENTORY, items());
+		ledger.offer(1, sell(SHARK, 10, 800, 4, 3_200, false));
+		ledger.settle(T0 + 1000, prices, UTC);
+		long worth = ledger.getTotal();
+
+		ledger.setAtExchange(true);
+		ledger.observe(Store.INVENTORY, items(SHARK, 6));
+		ledger.settle(T0 + 2000, prices, UTC);
+		assertEquals(worth, ledger.getTotal());
+	}
+
+	@Test
+	public void collectingTheChangeFromABuyStillTradingIsNotCountedTwice()
+	{
+		open();
+		// Bid 1,000 each for 1,000 sharks; 500 trade at 800, so 100k of change waits in the slot.
+		ledger.observe(Store.BANK, items(WHIP, 1));
+		ledger.offer(0, buy(SHARK, 1_000, 1_000, 500, 400_000, true));
+		ledger.settle(T0 + 1000, prices, UTC);
+		long worth = ledger.getTotal();
+
+		ledger.setAtExchange(true);
+		ledger.observe(Store.INVENTORY, items(SHARK, 10, COINS, 100_000));
+		ledger.settle(T0 + 2000, prices, UTC);
+		assertEquals(worth, ledger.getTotal());
+
+		// It finishes at the same price and the rest is collected to the bank.
+		ledger.setAtExchange(false);
+		ledger.offer(0, buy(SHARK, 1_000, 1_000, 1_000, 800_000, false));
+		ledger.settle(T0 + 3000, prices, UTC);
+		assertEquals(worth, ledger.getTotal());
+		ledger.offer(0, null);
+		ledger.settle(T0 + 4000, prices, UTC);
+		assertEquals(100_000, bank(COINS));
+		assertEquals(worth, ledger.getTotal());
+	}
+
+	@Test
 	public void hugeOffersDoNotOverflow()
 	{
 		Offer offer = buy(WHIP, 2_000, 2_000_000_000, 0, 0, true);
