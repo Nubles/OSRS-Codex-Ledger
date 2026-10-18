@@ -149,7 +149,7 @@ public class Crest extends JComponent
 				int x = tx + i * cw;
 				g.setColor(Theme.TEXT_FAINT);
 				g.drawString(PERIODS[i], x, cy - 11);
-				String value = hasChange[i] ? Format.signed(changes[i]) : "-";
+				String value = hasChange[i] ? Format.signedCompact(changes[i]) : "-";
 				Ui.shadowed(g, Ui.clip(value, small, cw - 4), x, cy + 1, hasChange[i] ? Theme.signed(changes[i]) : Theme.TEXT_FAINT);
 			}
 		}

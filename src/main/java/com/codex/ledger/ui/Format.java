@@ -41,7 +41,35 @@ public final class Format
 		{
 			return trim(n / 1_000_000.0, 1) + "M";
 		}
+		if (n < 10_000_000_000L)
+		{
+			return trim(n / 1_000_000_000.0, 3) + "B";
+		}
 		return trim(n / 1_000_000_000.0, 2) + "B";
+	}
+
+	/** At most three figures, for tight columns: "8,240", "41.2k", "628M", "1.53B". */
+	public static String compact(long n)
+	{
+		if (n < 10_000)
+		{
+			return String.format(Locale.ENGLISH, "%,d", n);
+		}
+		if (n < 1_000_000)
+		{
+			return n < 100_000 ? trim(n / 1_000.0, 1) + "k" : Math.round(n / 1_000.0) + "k";
+		}
+		if (n < 1_000_000_000)
+		{
+			return n < 10_000_000 ? trim(n / 1_000_000.0, 2) + "M" : n < 100_000_000 ? trim(n / 1_000_000.0, 1) + "M" : Math.round(n / 1_000_000.0) + "M";
+		}
+		return n < 10_000_000_000L ? trim(n / 1_000_000_000.0, 2) + "B" : trim(n / 1_000_000_000.0, 1) + "B";
+	}
+
+	/** A change with its sign, in at most three figures: "+628M". */
+	public static String signedCompact(long gp)
+	{
+		return gp > 0 ? "+" + compact(gp) : gp < 0 ? "-" + compact(-gp) : "0";
 	}
 
 	/** Coins in the short form, negative amounts with a minus: "812.4M", "-45.2k". */
