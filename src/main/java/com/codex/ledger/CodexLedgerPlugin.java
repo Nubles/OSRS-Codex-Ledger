@@ -19,6 +19,7 @@ import java.time.ZoneId;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import net.runelite.api.ChatMessageType;
@@ -48,6 +49,7 @@ import net.runelite.client.chat.ChatMessageManager;
 import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.events.ClientShutdown;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.events.RuneScapeProfileChanged;
 import net.runelite.client.game.ItemManager;
@@ -73,7 +75,7 @@ public class CodexLedgerPlugin extends Plugin
 	private static final int REVALUE_TICKS = 100;
 	/**
 	 * Ticks between saves while something has changed, about five minutes. The ledger is also saved
-	 * on logout, on a profile switch and when the plugin stops, so little is ever at risk.
+	 * on logout, on a profile switch, when the plugin stops and when the client closes.
 	 */
 	private static final int SAVE_TICKS = 500;
 	/** Ticks between refreshing the panel and plaque while the ledger keeps changing. */
@@ -194,6 +196,29 @@ public class CodexLedgerPlugin extends Plugin
 			loggedInTicks = -1;
 		});
 		panel = null;
+	}
+
+	@Subscribe
+	public void onClientShutdown(ClientShutdown event)
+	{
+		// ConfigManager writes its changes to disk in this same event, before a save queued on the
+		// client thread runs, so a save made here has to be sent on by hand or it is never written.
+		CompletableFuture<Void> done = new CompletableFuture<>();
+		clientThread.invokeLater(() ->
+		{
+			try
+			{
+				if (save())
+				{
+					configManager.sendConfig();
+				}
+			}
+			finally
+			{
+				done.complete(null);
+			}
+		});
+		event.waitFor(done);
 	}
 
 	@Subscribe
@@ -494,14 +519,16 @@ public class CodexLedgerPlugin extends Plugin
 		dirty = true;
 	}
 
-	private void save()
+	/** Writes the ledger to the profile if it changed, and says whether it did. */
+	private boolean save()
 	{
 		if (profile == null || ledger == null || !unsaved)
 		{
-			return;
+			return false;
 		}
 		unsaved = false;
 		configManager.setConfiguration(CodexLedgerConfig.GROUP, profile, LEDGER_KEY, gson.toJson(ledger));
+		return true;
 	}
 
 	private void summary()
