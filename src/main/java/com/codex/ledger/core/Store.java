@@ -8,7 +8,8 @@ public enum Store
 	EQUIPMENT("Worn"),
 	GRAND_EXCHANGE("Grand Exchange"),
 	SEED_VAULT("Seed vault"),
-	LOOTING_BAG("Looting bag");
+	LOOTING_BAG("Looting bag"),
+	RUNE_POUCH("Rune pouch");
 
 	private final String label;
 

@@ -48,6 +48,7 @@ public class LedgerTest
 	{
 		ledger.observe(Store.INVENTORY, items(SHARK, 10));
 		ledger.observe(Store.BANK, items(COINS, 1_000_000, WHIP, 1));
+		ledger.offer(7, null);
 		ledger.settle(T0, prices, UTC);
 	}
 
@@ -168,27 +169,248 @@ public class LedgerTest
 		assertEquals(8_000, ledger.value(Store.INVENTORY));
 	}
 
+	private static Offer buy(int item, int total, long price, int done, long spent, boolean active)
+	{
+		return new Offer(item, true, total, price, done, spent, active);
+	}
+
+	private static Offer sell(int item, int total, long price, int done, long spent, boolean active)
+	{
+		return new Offer(item, false, total, price, done, spent, active);
+	}
+
+	private long bank(int item)
+	{
+		return ledger.getStores().get(Store.BANK).getItems().getOrDefault(item, 0L);
+	}
+
 	@Test
 	public void collectingToTheBankIsNotALoss()
 	{
 		open();
-		ledger.observe(Store.GRAND_EXCHANGE, items(WHIP, 1));
-		ledger.observe(Store.BANK, items(COINS, 0));
+		// A whip bought for 1M with coins from the bank, then collected while the bank is closed.
+		ledger.observe(Store.BANK, items(WHIP, 1));
+		ledger.offer(0, buy(WHIP, 1, 1_000_000, 0, 0, true));
 		ledger.settle(T0 + 1000, prices, UTC);
-		// The whip bought on the exchange is collected while the bank is closed.
-		ledger.observe(Store.GRAND_EXCHANGE, items());
+		assertEquals(2_508_000, ledger.getTotal());
+		ledger.offer(0, buy(WHIP, 1, 1_000_000, 1, 1_000_000, false));
+		ledger.settle(T0 + 1500, prices, UTC);
+		assertEquals(3_008_000, ledger.getTotal());
+		ledger.offer(0, null);
 		ledger.settle(T0 + 2000, prices, UTC);
-		assertEquals(1L, (long) ledger.getStores().get(Store.BANK).getItems().get(WHIP));
-		assertEquals(1_508_000, ledger.getTotal());
+		assertEquals(2, bank(WHIP));
+		assertEquals(3_008_000, ledger.getTotal());
 
 		// Collected to the inventory instead, it lands there and nowhere else.
-		ledger.observe(Store.GRAND_EXCHANGE, items(SHARK, 5));
+		ledger.observe(Store.INVENTORY, items());
+		ledger.offer(1, sell(SHARK, 10, 800, 0, 0, true));
 		ledger.settle(T0 + 3000, prices, UTC);
-		ledger.observe(Store.GRAND_EXCHANGE, items());
-		ledger.observe(Store.INVENTORY, items(SHARK, 15));
+		ledger.offer(1, sell(SHARK, 10, 800, 0, 0, false));
+		ledger.settle(T0 + 3500, prices, UTC);
+		ledger.offer(1, null);
+		ledger.observe(Store.INVENTORY, items(SHARK, 10));
 		ledger.settle(T0 + 4000, prices, UTC);
-		assertEquals(null, ledger.getStores().get(Store.BANK).getItems().get(SHARK));
-		assertEquals(1_512_000, ledger.getTotal());
+		assertEquals(0, bank(SHARK));
+		assertEquals(3_008_000, ledger.getTotal());
+		assertEquals(500_000, ledger.getDays().get(0).getPlay());
+	}
+
+	@Test
+	public void anOfferFillingIsNotACollection()
+	{
+		open();
+		// Bid 1,000 coins each for 1,000 sharks; they trade at 800.
+		ledger.observe(Store.BANK, items(WHIP, 1));
+		ledger.offer(0, buy(SHARK, 1_000, 1_000, 0, 0, true));
+		ledger.settle(T0 + 1000, prices, UTC);
+		assertEquals(2_508_000, ledger.getTotal());
+
+		// Half fill at 900 each: 450k coins become 500 sharks worth 400k.
+		ledger.offer(0, buy(SHARK, 1_000, 1_000, 500, 450_000, true));
+		ledger.settle(T0 + 2000, prices, UTC);
+		assertEquals(0, bank(COINS));
+		assertEquals(0, bank(SHARK));
+		assertEquals(550_000, (long) ledger.getStores().get(Store.GRAND_EXCHANGE).getItems().get(COINS));
+		assertEquals(2_508_000 - 50_000, ledger.getTotal());
+	}
+
+	@Test
+	public void aSaleCountsTheTaxAndCollectingTheCoinsIsNotAGain()
+	{
+		open();
+		ledger.observe(Store.BANK, items(COINS, 1_000_000));
+		ledger.offer(2, sell(WHIP, 1, 1_500_000, 0, 0, true));
+		ledger.settle(T0 + 1000, prices, UTC);
+		assertEquals(2_508_000, ledger.getTotal());
+
+		ledger.offer(2, sell(WHIP, 1, 1_500_000, 1, 1_500_000, false));
+		ledger.settle(T0 + 2000, prices, UTC);
+		// 2% tax: 30k.
+		assertEquals(2_478_000, ledger.getTotal());
+		assertEquals(-30_000, ledger.getDays().get(0).getPlay());
+
+		ledger.offer(2, null);
+		ledger.observe(Store.INVENTORY, items(SHARK, 10, COINS, 1_470_000));
+		ledger.settle(T0 + 3000, prices, UTC);
+		assertEquals(2_478_000, ledger.getTotal());
+		assertEquals(1_000_000, bank(COINS));
+	}
+
+	@Test
+	public void taxIsCappedAndSkipsCheapItemsAndBonds()
+	{
+		assertEquals(5_000_000L, Offer.tax(WHIP, 1, 1_000_000_000L));
+		assertEquals(0, Offer.tax(SHARK, 100, 4_900));
+		assertEquals(0, Offer.tax(Ledger.BOND, 1, 10_000_000L));
+		assertEquals(2 * 16, Offer.tax(SHARK, 2, 1_600));
+	}
+
+	@Test
+	public void collectingPartOfAnOfferStillTradingIsNotCountedTwice()
+	{
+		open();
+		ledger.observe(Store.BANK, items(WHIP, 1));
+		ledger.offer(0, buy(SHARK, 1_000, 800, 400, 320_000, true));
+		ledger.settle(T0 + 1000, prices, UTC);
+		long worth = ledger.getTotal();
+
+		// Collect the 400 bought so far into the inventory at the exchange.
+		ledger.setAtExchange(true);
+		ledger.observe(Store.INVENTORY, items(SHARK, 410));
+		ledger.settle(T0 + 2000, prices, UTC);
+		assertEquals(worth, ledger.getTotal());
+		assertEquals(null, ledger.getStores().get(Store.GRAND_EXCHANGE).getItems().get(SHARK));
+
+		// It finishes later and the rest is collected to the bank.
+		ledger.setAtExchange(false);
+		ledger.offer(0, buy(SHARK, 1_000, 800, 1_000, 800_000, false));
+		ledger.settle(T0 + 3000, prices, UTC);
+		assertEquals(worth, ledger.getTotal());
+		ledger.offer(0, null);
+		ledger.settle(T0 + 4000, prices, UTC);
+		assertEquals(600, bank(SHARK));
+		assertEquals(worth, ledger.getTotal());
+	}
+
+	@Test
+	public void collectingOnlyTheItemsOfAFinishedOfferIsNotCountedTwice()
+	{
+		open();
+		// Bid 1,000 each for 100 sharks; they all trade at 800, leaving 20k refund in the slot.
+		ledger.observe(Store.BANK, items(WHIP, 1, COINS, 900_000));
+		ledger.offer(0, buy(SHARK, 100, 1_000, 100, 80_000, false));
+		ledger.settle(T0 + 1000, prices, UTC);
+		long worth = ledger.getTotal();
+
+		// Take just the sharks; the refund stays in the slot.
+		ledger.setAtExchange(true);
+		ledger.observe(Store.INVENTORY, items(SHARK, 110));
+		ledger.settle(T0 + 2000, prices, UTC);
+		assertEquals(worth, ledger.getTotal());
+
+		// Then the coins, which empties the slot.
+		ledger.offer(0, null);
+		ledger.observe(Store.INVENTORY, items(SHARK, 110, COINS, 20_000));
+		ledger.settle(T0 + 3000, prices, UTC);
+		assertEquals(worth, ledger.getTotal());
+		assertEquals(0, bank(SHARK));
+	}
+
+	@Test
+	public void collectingTheItemsBackFromACancelledSaleIsNotCountedTwice()
+	{
+		open();
+		ledger.observe(Store.INVENTORY, items());
+		ledger.offer(1, sell(SHARK, 10, 800, 4, 3_200, false));
+		ledger.settle(T0 + 1000, prices, UTC);
+		long worth = ledger.getTotal();
+
+		ledger.setAtExchange(true);
+		ledger.observe(Store.INVENTORY, items(SHARK, 6));
+		ledger.settle(T0 + 2000, prices, UTC);
+		assertEquals(worth, ledger.getTotal());
+	}
+
+	@Test
+	public void collectingTheChangeFromABuyStillTradingIsNotCountedTwice()
+	{
+		open();
+		// Bid 1,000 each for 1,000 sharks; 500 trade at 800, so 100k of change waits in the slot.
+		ledger.observe(Store.BANK, items(WHIP, 1));
+		ledger.offer(0, buy(SHARK, 1_000, 1_000, 500, 400_000, true));
+		ledger.settle(T0 + 1000, prices, UTC);
+		long worth = ledger.getTotal();
+
+		ledger.setAtExchange(true);
+		ledger.observe(Store.INVENTORY, items(SHARK, 10, COINS, 100_000));
+		ledger.settle(T0 + 2000, prices, UTC);
+		assertEquals(worth, ledger.getTotal());
+
+		// It finishes at the same price and the rest is collected to the bank.
+		ledger.setAtExchange(false);
+		ledger.offer(0, buy(SHARK, 1_000, 1_000, 1_000, 800_000, false));
+		ledger.settle(T0 + 3000, prices, UTC);
+		assertEquals(worth, ledger.getTotal());
+		ledger.offer(0, null);
+		ledger.settle(T0 + 4000, prices, UTC);
+		assertEquals(100_000, bank(COINS));
+		assertEquals(worth, ledger.getTotal());
+	}
+
+	@Test
+	public void hugeOffersDoNotOverflow()
+	{
+		Offer offer = buy(WHIP, 2_000, 2_000_000_000, 0, 0, true);
+		assertEquals(4_000_000_000_000L, (long) offer.contents().get(COINS));
+	}
+
+	@Test
+	public void aLostLootingBagTakesItsContents()
+	{
+		open();
+		ledger.observe(Store.INVENTORY, items(SHARK, 10, Ledger.LOOTING_BAG, 1));
+		ledger.observe(Store.LOOTING_BAG, items(WHIP, 1));
+		ledger.settle(T0 + 1000, prices, UTC);
+		ledger.observe(Store.BANK, items(COINS, 1_000_000));
+		ledger.settle(T0 + 2000, prices, UTC);
+		assertEquals(2_508_000, ledger.getTotal());
+
+		// Died in the wilderness: the bag and the whip in it are gone.
+		ledger.observe(Store.INVENTORY, items());
+		ledger.settle(T0 + 3000, prices, UTC);
+		assertTrue(ledger.getStores().get(Store.LOOTING_BAG).getItems().isEmpty());
+		assertEquals(1_000_000, ledger.getTotal());
+	}
+
+	@Test
+	public void aBankedLootingBagKeepsItsContents()
+	{
+		open();
+		ledger.observe(Store.INVENTORY, items(Ledger.LOOTING_BAG, 1));
+		ledger.observe(Store.LOOTING_BAG, items(SHARK, 5));
+		ledger.settle(T0 + 1000, prices, UTC);
+		ledger.observe(Store.INVENTORY, items());
+		ledger.observe(Store.BANK, items(COINS, 1_000_000, WHIP, 1, Ledger.LOOTING_BAG, 1));
+		ledger.settle(T0 + 2000, prices, UTC);
+		assertEquals(5L, (long) ledger.getStores().get(Store.LOOTING_BAG).getItems().get(SHARK));
+	}
+
+	@Test
+	public void aLedgerSavedBeforeSlotsWereKeptStillReads()
+	{
+		String old = "{\"stores\":{\"BANK\":{\"seen\":1,\"items\":{\"995\":1000}},"
+			+ "\"GRAND_EXCHANGE\":{\"seen\":1,\"items\":{\"995\":500}}},\"prices\":{\"995\":1},"
+			+ "\"history\":[{\"t\":1,\"v\":1500}],\"days\":[{\"date\":\"2026-10-01\",\"open\":1500,\"close\":1500,"
+			+ "\"high\":1500,\"low\":1500,\"items\":{}}],\"total\":1500,\"since\":1}";
+		Ledger read = new com.google.gson.GsonBuilder().create().fromJson(old, Ledger.class).repair();
+		assertEquals(1500, read.getTotal());
+		read.settle(T0, prices, UTC);
+		assertEquals(1500, read.getTotal());
+		assertEquals(500, read.value(Store.GRAND_EXCHANGE));
+		// The first look at the slots replaces the old figure.
+		read.offer(0, buy(SHARK, 1, 500, 0, 0, true));
+		read.settle(T0 + 1000, prices, UTC);
+		assertEquals(1500, read.getTotal());
 	}
 
 	@Test

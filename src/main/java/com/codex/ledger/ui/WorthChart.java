@@ -30,13 +30,16 @@ class WorthChart extends JComponent
 	private final long to;
 	private final boolean intraday;
 	private int hover = -1;
+	/** Where the pointer was, carried from the chart this one replaced so a refresh keeps the crosshair. */
+	private final int[] pointer;
 
 	/**
 	 * @param points oldest first, already cut to the range
 	 * @param intraday label the axis with times rather than dates
 	 */
-	WorthChart(List<Ledger.Point> points, long from, long to, boolean intraday)
+	WorthChart(List<Ledger.Point> points, long from, long to, boolean intraday, int[] pointer)
 	{
+		this.pointer = pointer;
 		this.points = points;
 		this.from = from;
 		this.to = Math.max(from + 1, to);
@@ -48,6 +51,7 @@ class WorthChart extends JComponent
 			@Override
 			public void mouseMoved(MouseEvent e)
 			{
+				pointer[0] = e.getX();
 				int index = nearest(e.getX());
 				if (index != hover)
 				{
@@ -59,6 +63,7 @@ class WorthChart extends JComponent
 			@Override
 			public void mouseExited(MouseEvent e)
 			{
+				pointer[0] = -1;
 				hover = -1;
 				repaint();
 			}
@@ -96,6 +101,10 @@ class WorthChart extends JComponent
 		int w = getWidth();
 		int h = getHeight();
 		int plotBottom = h - BOTTOM;
+		if (hover < 0 && pointer[0] >= 0)
+		{
+			hover = nearest(pointer[0]);
+		}
 		g.setFont(Theme.small());
 		FontMetrics fm = g.getFontMetrics();
 

@@ -28,6 +28,10 @@ public final class Ledger
 {
 	/** Pages kept in the day book. */
 	public static final int DAYS = 120;
+	static final int COINS = 995;
+	static final int BOND = 13190;
+	static final int LOOTING_BAG = 11941;
+	static final int LOOTING_BAG_OPEN = 22586;
 
 	private Map<Store, Holding> stores = new LinkedHashMap<>();
 	private Map<Integer, Long> prices = new HashMap<>();
@@ -35,8 +39,13 @@ public final class Ledger
 	private List<Day> days = new ArrayList<>();
 	private long total;
 	private long since;
+	/** Each Grand Exchange slot as last seen; missing from ledgers saved before slots were kept. */
+	private Map<Integer, Offer> exchange = new HashMap<>();
 
 	private transient Map<Store, Map<Integer, Long>> pending;
+	/** Slots seen since the last settle; a null offer is an empty slot. */
+	private transient Map<Integer, Offer> pendingOffers;
+	private transient boolean atExchange;
 
 	/** One place as last seen. */
 	public static final class Holding
@@ -110,9 +119,28 @@ public final class Ledger
 		pending.put(store, copy);
 	}
 
+	/** Records what a Grand Exchange slot holds now, or null when it is empty; it counts at the next settle. */
+	public void offer(int slot, Offer offer)
+	{
+		if (pendingOffers == null)
+		{
+			pendingOffers = new HashMap<>();
+		}
+		pendingOffers.put(slot, offer);
+	}
+
+	/**
+	 * Whether the player has the Grand Exchange or a collection box open, where items arriving in
+	 * the inventory may be collected from an offer that is still trading.
+	 */
+	public void setAtExchange(boolean atExchange)
+	{
+		this.atExchange = atExchange;
+	}
+
 	public boolean hasPending()
 	{
-		return pending != null && !pending.isEmpty();
+		return pending != null && !pending.isEmpty() || pendingOffers != null && !pendingOffers.isEmpty();
 	}
 
 	/**
@@ -125,9 +153,15 @@ public final class Ledger
 		Map<Integer, Long> before = aggregate();
 		Map<Integer, Long> found = new HashMap<>();
 		boolean wasReady = isReady();
-		if (pending != null)
+		if (pending == null)
 		{
-			collectToBank();
+			pending = new EnumMap<>(Store.class);
+		}
+		Map<Integer, Long> collected = settleExchange();
+		emptyLostLootingBag();
+		if (!pending.isEmpty())
+		{
+			collectToBank(collected);
 			for (Map.Entry<Store, Map<Integer, Long>> e : pending.entrySet())
 			{
 				if (!stores.containsKey(e.getKey()))
@@ -215,46 +249,140 @@ public final class Ledger
 	}
 
 	/**
-	 * Items that leave the Grand Exchange without reaching the inventory were collected to the
-	 * bank, so they are put there now rather than counted lost until the bank is next opened.
-	 * Opening the bank replaces this guess with what is really there.
+	 * Works out what the exchange holds from its slots, and what left it. An offer that is
+	 * collected leaves its slot empty, and what was in it went to the inventory or the bank; one
+	 * still trading may have part of it collected while the exchange is open. Progress on an
+	 * offer (coins turning into items, items into coins) is not a collection.
+	 *
+	 * @return what was collected and did not reach the inventory
 	 */
-	private void collectToBank()
+	private Map<Integer, Long> settleExchange()
 	{
-		Map<Integer, Long> exchange = pending.get(Store.GRAND_EXCHANGE);
+		boolean changed = false;
+		Map<Integer, Long> collected = new HashMap<>();
+		if (pendingOffers != null && !pendingOffers.isEmpty())
+		{
+			for (Map.Entry<Integer, Offer> e : pendingOffers.entrySet())
+			{
+				Offer old = exchange.get(e.getKey());
+				Offer next = e.getValue();
+				if (next != null && next.same(old))
+				{
+					next.carry(old);
+				}
+				else if (old != null)
+				{
+					// Collected, or collected elsewhere and the slot used again since.
+					addAll(collected, old.contents());
+				}
+				if (next == null)
+				{
+					exchange.remove(e.getKey());
+				}
+				else
+				{
+					exchange.put(e.getKey(), next);
+				}
+				changed = true;
+			}
+			pendingOffers.clear();
+		}
+
+		Map<Integer, Long> gains = inventoryGains();
+		for (Map.Entry<Integer, Long> e : collected.entrySet())
+		{
+			long found = Math.min(e.getValue(), gains.getOrDefault(e.getKey(), 0L));
+			if (found > 0)
+			{
+				e.setValue(e.getValue() - found);
+				gains.put(e.getKey(), gains.get(e.getKey()) - found);
+			}
+		}
+		collected.values().removeIf(q -> q <= 0);
+		if (atExchange && !gains.isEmpty())
+		{
+			for (Offer offer : exchange.values())
+			{
+				changed |= offer.collect(gains);
+			}
+		}
+		if (changed)
+		{
+			Map<Integer, Long> held = new HashMap<>();
+			for (Offer offer : exchange.values())
+			{
+				addAll(held, offer.contents());
+			}
+			pending.put(Store.GRAND_EXCHANGE, held);
+		}
+		return collected;
+	}
+
+	/** Items the inventory gained since it was last seen, when it is being seen now. */
+	private Map<Integer, Long> inventoryGains()
+	{
+		Map<Integer, Long> gains = new HashMap<>();
+		Map<Integer, Long> now = pending.get(Store.INVENTORY);
+		Holding then = stores.get(Store.INVENTORY);
+		if (now == null || then == null)
+		{
+			return gains;
+		}
+		for (Map.Entry<Integer, Long> e : now.entrySet())
+		{
+			long gain = e.getValue() - then.getItems().getOrDefault(e.getKey(), 0L);
+			if (gain > 0)
+			{
+				gains.put(e.getKey(), gain);
+			}
+		}
+		return gains;
+	}
+
+	/**
+	 * What was collected from the exchange and did not reach the inventory went to the bank, so it
+	 * is put there now rather than counted lost until the bank is next opened. Opening the bank
+	 * replaces this guess with what is really there.
+	 */
+	private void collectToBank(Map<Integer, Long> collected)
+	{
 		Holding bank = stores.get(Store.BANK);
-		Holding oldExchange = stores.get(Store.GRAND_EXCHANGE);
-		if (exchange == null || bank == null || oldExchange == null || pending.containsKey(Store.BANK))
+		if (collected == null || collected.isEmpty() || bank == null || pending.containsKey(Store.BANK))
 		{
 			return;
 		}
-		Map<Integer, Long> invNow = pending.get(Store.INVENTORY);
-		Holding invThen = stores.get(Store.INVENTORY);
-		Map<Integer, Long> banked = null;
-		for (Map.Entry<Integer, Long> e : oldExchange.getItems().entrySet())
+		Map<Integer, Long> banked = new HashMap<>(bank.getItems());
+		addAll(banked, collected);
+		stores.put(Store.BANK, new Holding(bank.getSeen(), banked));
+	}
+
+	/**
+	 * A looting bag that is in neither the inventory nor the bank was lost with what was in it
+	 * (it is only ever opened in the wilderness, where a death keeps nothing), so its contents go.
+	 */
+	private void emptyLostLootingBag()
+	{
+		Map<Integer, Long> inv = pending.get(Store.INVENTORY);
+		Holding bag = stores.get(Store.LOOTING_BAG);
+		if (inv == null || bag == null || bag.getItems().isEmpty() || pending.containsKey(Store.LOOTING_BAG)
+			|| inv.containsKey(LOOTING_BAG) || inv.containsKey(LOOTING_BAG_OPEN))
 		{
-			long left = e.getValue() - exchange.getOrDefault(e.getKey(), 0L);
-			if (left <= 0)
-			{
-				continue;
-			}
-			if (invNow != null)
-			{
-				long before = invThen == null ? 0 : invThen.getItems().getOrDefault(e.getKey(), 0L);
-				left -= Math.max(0, invNow.getOrDefault(e.getKey(), 0L) - before);
-			}
-			if (left > 0)
-			{
-				if (banked == null)
-				{
-					banked = new HashMap<>(bank.getItems());
-				}
-				banked.merge(e.getKey(), left, Long::sum);
-			}
+			return;
 		}
-		if (banked != null)
+		Map<Integer, Long> bank = pending.containsKey(Store.BANK) ? pending.get(Store.BANK)
+			: stores.containsKey(Store.BANK) ? stores.get(Store.BANK).getItems() : Collections.emptyMap();
+		if (bank.containsKey(LOOTING_BAG) || bank.containsKey(LOOTING_BAG_OPEN))
 		{
-			stores.put(Store.BANK, new Holding(bank.getSeen(), banked));
+			return;
+		}
+		pending.put(Store.LOOTING_BAG, new HashMap<>());
+	}
+
+	private static void addAll(Map<Integer, Long> into, Map<Integer, Long> items)
+	{
+		for (Map.Entry<Integer, Long> e : items.entrySet())
+		{
+			into.merge(e.getKey(), e.getValue(), Long::sum);
 		}
 	}
 
@@ -324,12 +452,20 @@ public final class Ledger
 	public long value(Store store)
 	{
 		Holding h = stores.get(store);
-		if (h == null)
-		{
-			return 0;
-		}
+		return h == null ? 0 : value(h.getItems());
+	}
+
+	/** The Grand Exchange slots that hold an offer, by slot. */
+	public Map<Integer, Offer> getOffers()
+	{
+		return Collections.unmodifiableMap(new java.util.TreeMap<>(exchange));
+	}
+
+	/** What a set of items is worth at the last settle's prices. */
+	public long value(Map<Integer, Long> items)
+	{
 		long sum = 0;
-		for (Map.Entry<Integer, Long> e : h.getItems().entrySet())
+		for (Map.Entry<Integer, Long> e : items.entrySet())
 		{
 			sum += e.getValue() * prices.getOrDefault(e.getKey(), 0L);
 		}
@@ -395,6 +531,11 @@ public final class Ledger
 			days = new ArrayList<>();
 		}
 		days.removeIf(d -> d == null || d.getDate() == null);
+		if (exchange == null)
+		{
+			exchange = new HashMap<>();
+		}
+		exchange.values().removeIf(o -> o == null);
 		return this;
 	}
 }

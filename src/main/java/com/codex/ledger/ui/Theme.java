@@ -120,6 +120,8 @@ public final class Theme
 				return GREEN;
 			case SEED_VAULT:
 				return new Color(196, 168, 92).darker();
+			case RUNE_POUCH:
+				return new Color(214, 120, 150);
 			default:
 				return VIOLET;
 		}
