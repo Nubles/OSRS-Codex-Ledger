@@ -39,6 +39,7 @@ public class LedgerPanel extends PluginPanel
 	private static final String[] RANGES = {"Day", "Week", "Month", "Year", "All"};
 	private static final long[] RANGE_MS = {86_400_000L, 7 * 86_400_000L, 30 * 86_400_000L, 365 * 86_400_000L, 0};
 	private static final int[] RANGE_DAYS = {1, 7, 30, 365, 0};
+	private static final String[] RANGE_NOTES = {"today", "last 7 days", "last 30 days", "last year", "all time"};
 	private static final String[] SPANS = {"Today", "7 days", "30 days", "All"};
 	private static final int[] SPAN_DAYS = {1, 7, 30, 0};
 	private static final int LINES = 6;
@@ -71,6 +72,7 @@ public class LedgerPanel extends PluginPanel
 	private ZoneId zone = ZoneId.systemDefault();
 	private String openDay;
 	private int pagesShown = PAGES;
+	private final int[] chartPointer = {-1};
 	/** Tabs whose content is out of date; a hidden tab is only rebuilt when it is next shown. */
 	private final boolean[] stale = {true, true, true};
 
@@ -99,7 +101,11 @@ public class LedgerPanel extends PluginPanel
 
 		tabs.onChange(this::showTab);
 		range.setSelected(1, false);
-		range.onChange(i -> rebuildWorth());
+		range.onChange(i ->
+		{
+			chartPointer[0] = -1;
+			rebuildWorth();
+		});
 		span.onChange(i ->
 		{
 			openDay = null;
@@ -134,7 +140,25 @@ public class LedgerPanel extends PluginPanel
 		this.state = state;
 		this.now = now;
 		updateCrest(player);
-		rebuild();
+		if (isShowing())
+		{
+			rebuild();
+		}
+		else
+		{
+			// Nobody is looking; the tab on show is rebuilt when the panel is opened.
+			java.util.Arrays.fill(stale, true);
+		}
+	}
+
+	@Override
+	public void onActivate()
+	{
+		int tab = tabs.getSelected();
+		if (stale[tab])
+		{
+			rebuild(tab);
+		}
 	}
 
 	/** Opens one tab, for previews and tests. */
@@ -250,7 +274,7 @@ public class LedgerPanel extends PluginPanel
 		List<Ledger.Point> points = slice(ledger.getHistory(), from, to, ledger.getTotal());
 		Card chart = new Card(new BorderLayout());
 		chart.setBorder(new EmptyBorder(8, 8, 6, 8));
-		chart.add(new WorthChart(points, from, to, r == 0), BorderLayout.CENTER);
+		chart.add(new WorthChart(points, from, to, r == 0, chartPointer), BorderLayout.CENTER);
 		stack.add(chart);
 
 		Report report = Report.of(ledger, RANGE_DAYS[r], today(), 1);
@@ -274,20 +298,36 @@ public class LedgerPanel extends PluginPanel
 		}
 		JPanel tiles = new JPanel(new GridLayout(2, 2, 6, 6));
 		tiles.setOpaque(false);
-		tiles.add(new StatTile(Format.signed(report.getPlay()), "Play", "gained and spent", Theme.signed(report.getPlay())));
-		tiles.add(new StatTile(Format.signed(report.getMarket()), "Market", "prices moving", report.getMarket() >= 0 ? Theme.MARKET : Theme.EMBER));
+		String when = RANGE_NOTES[r];
+		tiles.add(new StatTile(Format.signed(report.getPlay()), "Play", when, Theme.signed(report.getPlay())));
+		tiles.add(new StatTile(Format.signed(report.getMarket()), "Market", when, report.getMarket() >= 0 ? Theme.MARKET : Theme.EMBER));
+		Day today = ledger.day(today());
+		if (r == 0 && today != null)
+		{
+			// One day has no best and worst; its high and low say more.
+			tiles.add(new StatTile(Format.coins(today.getHigh()), "High", "today", Theme.GOLD_BRIGHT));
+			tiles.add(new StatTile(Format.coins(today.getLow()), "Low", "today", Theme.GOLD));
+			stack.add(tiles);
+			whereKept(stack);
+			replace(worth, stack);
+			return;
+		}
 		tiles.add(new StatTile(best == null ? "-" : Format.signed(best.change()), "Best day",
 			best == null ? "" : Format.day(LocalDate.parse(best.getDate())), best == null ? Theme.TEXT_MUTED : Theme.signed(best.change())));
 		tiles.add(new StatTile(worst == null ? "-" : Format.signed(worst.change()), "Worst day",
 			worst == null ? "" : Format.day(LocalDate.parse(worst.getDate())), worst == null ? Theme.TEXT_MUTED : Theme.signed(worst.change())));
 		stack.add(tiles);
+		whereKept(stack);
+		replace(worth, stack);
+	}
 
+	private void whereKept(StackPanel stack)
+	{
 		stack.add(new SectionHeader("Where it is kept", Format.coins(ledger.getTotal())));
 		stack.add(new StoreBreakdown(parts()));
 		offers(stack);
 		stack.add(Ui.wrapped("Kept since " + Format.date(ledger.getSince()) + ". Places are counted as last seen, so the bank updates each time you open it.",
 			Theme.small(), Theme.TEXT_FAINT, WIDTH - 10));
-		replace(worth, stack);
 	}
 
 	private long firstPoint()
