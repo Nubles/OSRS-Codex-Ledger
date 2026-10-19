@@ -24,6 +24,7 @@ It is the sixth plugin in the **Codex** suite, after [Codex Navigator](https://g
 - **What pays.** With [Codex Session Chronicle](https://github.com/Nubles/OSRS-Codex-Session-Chronicle) installed, the Worth page ranks what you spent your sessions on over the last 30 days by net worth gained an hour played: loot, supplies, deaths and prices all count. Sessions under a quarter of an hour are left out.
 - **Login summary.** A line in the chat box when you log in with your worth, today's change and how much it moved while you were away (prices, finished Grand Exchange offers). It can be turned off.
 - **Plaque.** An optional slim plaque in the game view with your worth and today's change.
+- **Before the first bank visit.** The ledger begins when it first sees your bank. Until then, if you use [Codex Bank Steward](https://github.com/Nubles/OSRS-Codex-Bank-Steward), the crest gives an estimate with Bank Steward's saved copy of your bank at today's prices, marked as an estimate with the copy's age. Nothing in it is booked: the ledger still starts from your real bank.
 
 <p align="center">
   <img src="docs/screenshots/daybook-page.png" width="225" alt="One day">
