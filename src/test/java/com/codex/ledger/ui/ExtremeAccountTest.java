@@ -174,7 +174,8 @@ public class ExtremeAccountTest
 	/** The best of a few runs of a piece of work, in milliseconds, after warming it up. */
 	private static double best(Runnable work)
 	{
-		for (int i = 0; i < 5; i++)
+		// Warmed well first: a test machine's first runs are the compiler's, not the plugin's.
+		for (int i = 0; i < 25; i++)
 		{
 			work.run();
 		}
