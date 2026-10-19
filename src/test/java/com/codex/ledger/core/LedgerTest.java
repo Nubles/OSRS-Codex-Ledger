@@ -266,6 +266,21 @@ public class LedgerTest
 	}
 
 	@Test
+	public void theItemsTheGameLeavesUntaxedPayNoTax()
+	{
+		// Lobsters at 150, rings of dueling (8) at 900 and house tabs at 500 would pay 3, 18 and 10 each.
+		assertEquals(0, Offer.tax(379, 1_000, 150_000));
+		assertEquals(0, Offer.tax(2552, 10, 9_000));
+		assertEquals(0, Offer.tax(8013, 100, 50_000));
+		// Energy potions, the Civitas tablet and the saw too.
+		assertEquals(0, Offer.tax(3008, 50, 25_000));
+		assertEquals(0, Offer.tax(28824, 20, 20_000));
+		assertEquals(0, Offer.tax(8794, 5, 2_500));
+		// Sharks are not on the list and pay.
+		assertEquals(16 * 100, Offer.tax(SHARK, 100, 80_000));
+	}
+
+	@Test
 	public void collectingPartOfAnOfferStillTradingIsNotCountedTwice()
 	{
 		open();

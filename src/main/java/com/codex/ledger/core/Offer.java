@@ -1,7 +1,10 @@
 package com.codex.ledger.core;
 
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * One Grand Exchange slot as last seen, and what is sitting in it for the player to collect.
@@ -17,6 +20,25 @@ public final class Offer
 	static final long TAX_CAP = 5_000_000L;
 	/** Items sold for less than this pay no tax. */
 	static final long TAX_FREE_BELOW = 50;
+	/**
+	 * Items the exchange never taxes, whatever their price: bonds, and the everyday supplies, teleports
+	 * and tools Jagex exempted to help newer players.
+	 */
+	static final Set<Integer> TAX_FREE = new HashSet<>(Arrays.asList(
+		Ledger.BOND,
+		// Energy potions (4) to (1).
+		3008, 3010, 3012, 3014,
+		// Bronze, iron and steel arrows and darts; mind runes.
+		882, 884, 886, 806, 807, 808, 558,
+		// Bass, bread, cake, cooked chicken, cooked meat, herring, lobster, mackerel, meat pie, pike,
+		// salmon, shrimps, tuna.
+		365, 2309, 1891, 2140, 2142, 347, 379, 355, 2327, 351, 329, 315, 361,
+		// Ardougne, Camelot, Civitas illa fortis, Falador, Kourend castle, Lumbridge and Varrock
+		// teleports, teleport to house, games necklace (8), ring of dueling (8).
+		8011, 8010, 28824, 8009, 28790, 8008, 8007, 8013, 3853, 2552,
+		// Chisel, gardening trowel, glassblowing pipe, hammer, needle, pestle and mortar, rake, saw,
+		// secateurs, seed dibber, shears, spade, watering can.
+		1755, 5325, 1785, 2347, 1733, 233, 5341, 8794, 5329, 5343, 1735, 952, 5331));
 
 	private int item;
 	private boolean buy;
@@ -66,7 +88,7 @@ public final class Offer
 	/** The tax the exchange keeps from a sale of so many items for so many coins. */
 	static long tax(int itemId, long sold, long gross)
 	{
-		if (sold <= 0 || gross <= 0 || itemId == Ledger.BOND)
+		if (sold <= 0 || gross <= 0 || TAX_FREE.contains(itemId))
 		{
 			return 0;
 		}

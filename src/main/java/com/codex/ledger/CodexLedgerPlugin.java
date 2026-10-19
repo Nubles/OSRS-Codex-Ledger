@@ -4,6 +4,7 @@ import com.codex.ledger.core.Day;
 import com.codex.ledger.core.Ledger;
 import com.codex.ledger.core.Offer;
 import com.codex.ledger.core.Report;
+import com.codex.ledger.core.SafeDeath;
 import com.codex.ledger.core.Store;
 import com.codex.ledger.overlay.WorthPlaque;
 import com.codex.ledger.ui.Format;
@@ -32,6 +33,8 @@ import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.Player;
+import net.runelite.api.coords.LocalPoint;
+import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ActorDeath;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
@@ -313,10 +316,21 @@ public class CodexLedgerPlugin extends Plugin
 	public void onActorDeath(ActorDeath event)
 	{
 		// What the death takes leaves the account a few ticks later, when the player is sent home.
-		if (ledger != null && event.getActor() == client.getLocalPlayer())
+		// A death in a raid or a safe minigame takes nothing; what is eaten after it is supplies.
+		Player me = client.getLocalPlayer();
+		if (ledger != null && me != null && event.getActor() == me && !safeDeath(me))
 		{
 			ledger.died(System.currentTimeMillis());
 		}
+	}
+
+	/** True where the game keeps everything on death: the raids and the safe minigames and arenas. */
+	private boolean safeDeath(Player me)
+	{
+		LocalPoint local = me.getLocalLocation();
+		int region = local == null ? -1 : WorldPoint.fromLocalInstance(client, local).getRegionID();
+		return SafeDeath.isSafe(region, client.getVarbitValue(VarbitID.RAIDS_CLIENT_INDUNGEON) > 0,
+			client.getVarbitValue(VarbitID.TOB_CLIENT_PARTYSTATUS));
 	}
 
 	@Subscribe

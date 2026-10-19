@@ -791,7 +791,7 @@ public class LedgerPanel extends PluginPanel
 				+ " so no profit or loss is counted on them.", Theme.small(), Theme.TEXT_FAINT, WIDTH - 10));
 		}
 		stack.add(Ui.wrapped("Each sale is matched to the average cost of what you bought. Tax is 2% of the price, at most 5M an item; "
-			+ "none under 50 coins or on bonds." + (s == 3 ? "" : " Pages older than today keep their biggest items only."),
+			+ "none under 50 coins, or on bonds and the other tax-free items." + (s == 3 ? "" : " Pages older than today keep their biggest items only."),
 			Theme.small(), Theme.TEXT_FAINT, WIDTH - 10));
 		replace(trades, stack);
 	}
