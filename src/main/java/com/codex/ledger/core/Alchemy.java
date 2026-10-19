@@ -97,8 +97,13 @@ public final class Alchemy
 				continue;
 			}
 			long each = price.applyAsLong(id);
+			if (each <= 0)
+			{
+				continue;
+			}
+			// Asked only for priced items: each first ask looks the item up in the game's cache.
 			long ha = highAlch.applyAsLong(id);
-			if (each <= 0 || ha <= 0)
+			if (ha <= 0)
 			{
 				continue;
 			}
