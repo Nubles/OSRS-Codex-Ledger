@@ -127,6 +127,21 @@ public final class Theme
 		}
 	}
 
+	public static Color kind(com.codex.ledger.core.Kind kind)
+	{
+		switch (kind)
+		{
+			case CASH:
+				return GOLD_BRIGHT;
+			case GEAR:
+				return new Color(150, 170, 230);
+			case SUPPLIES:
+				return EMBER;
+			default:
+				return TEAL;
+		}
+	}
+
 	/** Smooth shapes, but the pixel fonts stay crisp. */
 	public static void smooth(Graphics2D g)
 	{

@@ -25,10 +25,19 @@ class ItemRow extends JComponent
 	private final Color color;
 	private final double share;
 	private final ItemIcons icons;
+	/** The share written as a percent; rounded with the rows around it when they share one whole. */
+	private final String shareText;
 
 	/** @param share 0 to 1 for a share bar, or below 0 for none */
 	ItemRow(int itemId, String name, String note, String amount, Color color, double share, ItemIcons icons, String tip)
 	{
+		this(itemId, name, note, amount, color, share, share >= 0 ? Format.percent(share) : null, icons, tip);
+	}
+
+	/** @param shareText the share as the list rounded it with the others, "19%" */
+	ItemRow(int itemId, String name, String note, String amount, Color color, double share, String shareText, ItemIcons icons, String tip)
+	{
+		this.shareText = shareText;
 		this.itemId = itemId;
 		this.name = name;
 		this.note = note;
@@ -73,7 +82,7 @@ class ItemRow extends JComponent
 		{
 			int by = getHeight() - 6;
 			int bw = w - tx;
-			String pct = Format.percent(share);
+			String pct = shareText;
 			int pw = small.stringWidth(pct);
 			g.setColor(Theme.TEXT_FAINT);
 			g.drawString(Ui.clip(note, small, bw - pw - 8), tx, by - 3);

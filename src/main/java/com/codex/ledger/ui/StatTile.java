@@ -7,6 +7,7 @@ import java.awt.GradientPaint;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.geom.RoundRectangle2D;
+import java.util.Locale;
 import javax.swing.JComponent;
 
 /** A small engraved tablet: a big number, its label, and a quiet line of context. */
@@ -51,7 +52,7 @@ class StatTile extends JComponent
 		g.setFont(Theme.small());
 		FontMetrics small = g.getFontMetrics();
 		g.setColor(Theme.TEXT_MUTED);
-		g.drawString(label.toUpperCase(), x + 8, y + 6 + small.getAscent());
+		g.drawString(label.toUpperCase(Locale.ROOT), x + 8, y + 6 + small.getAscent());
 
 		g.setFont(Theme.title());
 		FontMetrics bold = g.getFontMetrics();

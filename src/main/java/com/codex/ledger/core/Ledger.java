@@ -1,10 +1,15 @@
 package com.codex.ledger.core;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -12,6 +17,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.IntFunction;
+import java.util.function.Function;
 
 /**
  * An account's ledger: what it holds in each place, what each item was last worth, the worth
@@ -32,6 +39,17 @@ public final class Ledger
 	static final int BOND = 13190;
 	static final int LOOTING_BAG = 11941;
 	static final int LOOTING_BAG_OPEN = 22586;
+	/** Items whose trades are remembered at most; those no longer held and traded longest ago go first. */
+	static final int BOOK = 300;
+	/**
+	 * How long after dying items leaving the account are lost to the death rather than used. The
+	 * game takes them when the player is sent home, a few ticks after the death itself.
+	 */
+	static final long DYING_MS = 15_000;
+	/** Pages whose deals by item are kept: the Trades page reaches back 30 days, older pages keep their day's totals. */
+	static final int DEAL_DAYS = 30;
+	/** How long after dying getting the same items back counts against that death. */
+	static final long REGAIN_MS = 3_600_000L;
 
 	private Map<Store, Holding> stores = new LinkedHashMap<>();
 	private Map<Integer, Long> prices = new HashMap<>();
@@ -41,11 +59,54 @@ public final class Ledger
 	private long since;
 	/** Each Grand Exchange slot as last seen; missing from ledgers saved before slots were kept. */
 	private Map<Integer, Offer> exchange = new HashMap<>();
+	/** Each item's standing on the exchange since the ledger began watching trades. */
+	private Map<Integer, Position> book = new HashMap<>();
+	/**
+	 * True once the slots have been seen whole while the ledger was open, so an offer seen for the
+	 * first time after that was placed since and its progress is trading done since.
+	 */
+	private boolean slotsKnown;
+	/** What the last death took, by item, while getting it back still counts against it. */
+	private Map<Integer, Long> lost = new HashMap<>();
+	private long lostUntil;
 
 	private transient Map<Store, Map<Integer, Long>> pending;
 	/** Slots seen since the last settle; a null offer is an empty slot. */
 	private transient Map<Integer, Offer> pendingOffers;
 	private transient boolean atExchange;
+	private transient long dyingUntil;
+	/** Set when the death took something at this settle; the death is then over and what goes after is used, not lost. */
+	private transient boolean tookByDeath;
+	/** Trades seen at the last settle of the exchange. */
+	private transient List<Fill> fills;
+	/** Tells what each item is, so the worth can be split by kind; null leaves days without it. */
+	private transient IntFunction<Kind> kinds;
+	/** When play time was last counted, or 0 after a gap. */
+	private transient long lastPlayed;
+	/** True when reading the save had to leave part of it out; see {@link #isMended()}. */
+	private transient boolean mended;
+	/** The longest damaged save set aside; one past it is only logged, so the profile never doubles in size for it. */
+	public static final int MAX_ASIDE = 1_000_000;
+
+	/** Part of an offer that traded between two sightings of its slot. */
+	private static final class Fill
+	{
+		final int item;
+		final boolean buy;
+		final long quantity;
+		/** Coins paid for a buy, or received before tax for a sale. */
+		final long coins;
+		final long tax;
+
+		Fill(int item, boolean buy, long quantity, long coins, long tax)
+		{
+			this.item = item;
+			this.buy = buy;
+			this.quantity = quantity;
+			this.coins = coins;
+			this.tax = tax;
+		}
+	}
 
 	/** One place as last seen. */
 	public static final class Holding
@@ -138,6 +199,50 @@ public final class Ledger
 		this.atExchange = atExchange;
 	}
 
+	/**
+	 * The player died: what leaves the account in the next moments is lost to the death, and what
+	 * comes back from the gravestone or Death in the hour after is set against it.
+	 */
+	public void died(long now)
+	{
+		dyingUntil = now + DYING_MS;
+		lost = new HashMap<>();
+		lostUntil = now + REGAIN_MS;
+	}
+
+	/** Sets how items are told apart by kind; it is asked once per item held at each settle. */
+	public void setKinds(IntFunction<Kind> kinds)
+	{
+		this.kinds = kinds;
+	}
+
+	/** A gap between two calls longer than this is time away, not play. */
+	static final long PLAY_GAP_MS = 5_000;
+
+	/**
+	 * Counts logged-in time toward today's page. Called every game tick while logged in; the time
+	 * between two calls counts unless it is a gap (a login, a loading screen, a stall).
+	 *
+	 * @return true when the time counted
+	 */
+	public boolean played(long now, ZoneId zone)
+	{
+		long last = lastPlayed;
+		lastPlayed = now;
+		if (!isReady() || last <= 0 || now <= last || now - last > PLAY_GAP_MS)
+		{
+			return false;
+		}
+		today(now, zone).played(now - last);
+		return true;
+	}
+
+	/** Play time stops counting until the next call; for a logout or a hop. */
+	public void pause()
+	{
+		lastPlayed = 0;
+	}
+
 	public boolean hasPending()
 	{
 		return pending != null && !pending.isEmpty() || pendingOffers != null && !pendingOffers.isEmpty();
@@ -157,7 +262,7 @@ public final class Ledger
 		{
 			pending = new EnumMap<>(Store.class);
 		}
-		Map<Integer, Long> collected = settleExchange();
+		Map<Integer, Long> collected = settleExchange(wasReady);
 		emptyLostLootingBag();
 		if (!pending.isEmpty())
 		{
@@ -186,10 +291,23 @@ public final class Ledger
 		boolean ready = isReady();
 		boolean opening = ready && !wasReady;
 		Day day = ready && !opening ? today(now, zone) : null;
+		// What trading moved, by item, so it can be told apart from everything else that came and went.
+		Map<Integer, Long> traded = new HashMap<>();
+		if (day != null)
+		{
+			for (Fill f : fills)
+			{
+				traded.merge(f.item, f.buy ? f.quantity : -f.quantity, Long::sum);
+				traded.merge(COINS, f.buy ? -f.coins : f.coins - f.tax, Long::sum);
+			}
+			ids.addAll(traded.keySet());
+		}
 		long play = 0;
 		long drift = 0;
 		long foundValue = 0;
 		long worth = 0;
+		long[] byKind = kinds == null ? null : new long[Kind.values().length];
+		long[] movedKind = kinds == null ? null : new long[Kind.values().length];
 		for (int id : ids)
 		{
 			long oldQ = before.getOrDefault(id, 0L);
@@ -204,12 +322,23 @@ public final class Ledger
 			long value = (newQ - oldQ) * price;
 			long moved = oldQ * (price - oldPrice);
 			worth += newQ * price;
+			if (byKind != null && (newQ > 0 || value != 0))
+			{
+				Kind kind = id == COINS ? Kind.CASH : kinds.apply(id);
+				int k = (kind == null ? Kind.MATERIALS : kind).ordinal();
+				byKind[k] += newQ * price;
+				// Items coming and going at today's price; a price moving is not a kind changing hands.
+				movedKind[k] += value;
+			}
 			foundValue += found.getOrDefault(id, 0L) * oldPrice;
 			play += value;
 			drift += moved;
-			if (day != null && (newQ != oldQ || moved != 0))
+			if (day != null)
 			{
-				day.flow(id, newQ - oldQ, value, moved);
+				long tq = traded.getOrDefault(id, 0L);
+				day.flow(id, newQ - oldQ, value, moved, tq, tq * price);
+				day.channel(Channel.EXCHANGE, tq * price);
+				channel(day, id, newQ - oldQ - tq, price, now);
 			}
 			if (newQ > 0)
 			{
@@ -227,7 +356,7 @@ public final class Ledger
 			history.clear();
 			days.clear();
 			total = worth;
-			today(now, zone);
+			today(now, zone).kinds(byKind);
 			history.add(new Point(now, worth));
 			return true;
 		}
@@ -235,11 +364,25 @@ public final class Ledger
 		total = worth;
 		if (day != null)
 		{
+			changed |= book(day, after, now);
 			if (foundValue != 0)
 			{
 				day.found(foundValue);
+				// The worth history takes it as opening balance too, so the chart, the week's change and the
+				// milestones do not read a place opened for the first time as worth gained.
+				List<Point> shifted = new ArrayList<>(history.size());
+				for (Point p : history)
+				{
+					shifted.add(new Point(p.getTime(), p.getValue() + foundValue));
+				}
+				history = shifted;
 			}
 			day.totals(play, drift, worth);
+			if (byKind != null)
+			{
+				day.kinds(byKind);
+				day.moved(movedKind);
+			}
 			if (changed || history.isEmpty())
 			{
 				record(now, worth);
@@ -256,10 +399,11 @@ public final class Ledger
 	 *
 	 * @return what was collected and did not reach the inventory
 	 */
-	private Map<Integer, Long> settleExchange()
+	private Map<Integer, Long> settleExchange(boolean ready)
 	{
 		boolean changed = false;
 		Map<Integer, Long> collected = new HashMap<>();
+		fills = new ArrayList<>();
 		if (pendingOffers != null && !pendingOffers.isEmpty())
 		{
 			for (Map.Entry<Integer, Offer> e : pendingOffers.entrySet())
@@ -268,12 +412,21 @@ public final class Ledger
 				Offer next = e.getValue();
 				if (next != null && next.same(old))
 				{
+					fill(next, old);
 					next.carry(old);
 				}
-				else if (old != null)
+				else
 				{
-					// Collected, or collected elsewhere and the slot used again since.
-					addAll(collected, old.contents());
+					if (old != null)
+					{
+						// Collected, or collected elsewhere and the slot used again since.
+						addAll(collected, old.contents());
+					}
+					if (next != null && slotsKnown)
+					{
+						// Placed since the slots were last seen; whatever it has done was traded since.
+						fill(next, null);
+					}
 				}
 				if (next == null)
 				{
@@ -286,6 +439,7 @@ public final class Ledger
 				changed = true;
 			}
 			pendingOffers.clear();
+			slotsKnown |= ready;
 		}
 
 		Map<Integer, Long> gains = inventoryGains();
@@ -316,6 +470,102 @@ public final class Ledger
 			pending.put(Store.GRAND_EXCHANGE, held);
 		}
 		return collected;
+	}
+
+	/** Notes what an offer traded since it was last seen, if anything. */
+	private void fill(Offer next, Offer old)
+	{
+		long quantity = next.getDone() - (old == null ? 0 : old.getDone());
+		if (quantity <= 0)
+		{
+			return;
+		}
+		long coins = next.getSpent() - (old == null ? 0 : old.getSpent());
+		long tax = next.isBuy() ? 0 : next.tax() - (old == null ? 0 : old.tax());
+		fills.add(new Fill(next.getItem(), next.isBuy(), quantity, Math.max(0, coins), Math.max(0, tax)));
+	}
+
+	/**
+	 * Books what an item did to the day, other than by trading, to where it came from: loot or
+	 * supplies, coins in or out, or a death.
+	 *
+	 * @param own the quantity gained or lost other than by trading
+	 */
+	private void channel(Day day, int id, long own, long price, long now)
+	{
+		if (own == 0 || price <= 0)
+		{
+			return;
+		}
+		if (own < 0 && now <= dyingUntil)
+		{
+			day.channel(Channel.DEATHS, own * price);
+			lost.merge(id, -own, Long::sum);
+			tookByDeath = true;
+			return;
+		}
+		if (own > 0 && now <= lostUntil && lost.containsKey(id))
+		{
+			long back = Math.min(own, lost.get(id));
+			day.channel(Channel.DEATHS, back * price);
+			lost.put(id, lost.get(id) - back);
+			lost.values().removeIf(q -> q <= 0);
+			own -= back;
+			if (own == 0)
+			{
+				return;
+			}
+		}
+		if (id == COINS)
+		{
+			day.channel(own > 0 ? Channel.COINS_IN : Channel.COINS_OUT, own * price);
+		}
+		else
+		{
+			day.channel(own > 0 ? Channel.LOOT : Channel.USED, own * price);
+		}
+	}
+
+	/**
+	 * Books the trades of the last settle: each item's position on the exchange and the day's
+	 * deals. Items bought that have since left the account other than by a sale leave the position.
+	 *
+	 * @return true when anything was traded
+	 */
+	private boolean book(Day day, Map<Integer, Long> held, long now)
+	{
+		if (now > lostUntil && !lost.isEmpty())
+		{
+			lost.clear();
+		}
+		if (tookByDeath)
+		{
+			tookByDeath = false;
+			dyingUntil = 0;
+		}
+		for (Fill f : fills)
+		{
+			Position position = book.computeIfAbsent(f.item, k -> new Position());
+			Deal deal = day.deal(f.item);
+			if (f.buy)
+			{
+				position.bought(f.quantity, f.coins, now);
+				deal.bought(f.quantity, f.coins);
+				day.getTrades().bought(f.quantity, f.coins);
+			}
+			else
+			{
+				position.sold(f.quantity, f.coins - f.tax, f.tax, now, deal, day.getTrades());
+			}
+		}
+		for (Map.Entry<Integer, Position> e : book.entrySet())
+		{
+			e.getValue().holdAtMost(held.getOrDefault(e.getKey(), 0L));
+		}
+		trimBook(BOOK);
+		boolean traded = !fills.isEmpty();
+		fills.clear();
+		return traded;
 	}
 
 	/** Items the inventory gained since it was last seen, when it is being seen now. */
@@ -398,9 +648,16 @@ public final class Ledger
 		if (last != null)
 		{
 			last.trim(Day.KEPT_ITEMS);
+			last.trimDeals(Day.KEPT_DEALS);
 		}
 		Day day = new Day(date, total);
 		days.add(day);
+		if (days.size() > DEAL_DAYS)
+		{
+			Day old = days.get(days.size() - 1 - DEAL_DAYS);
+			old.trimDeals(0);
+			old.trim(Day.OLD_ITEMS);
+		}
 		while (days.size() > DAYS)
 		{
 			days.remove(0);
@@ -461,6 +718,12 @@ public final class Ledger
 		return Collections.unmodifiableMap(new java.util.TreeMap<>(exchange));
 	}
 
+	/** Each item's standing on the exchange since the ledger began watching trades. */
+	public Map<Integer, Position> getBook()
+	{
+		return Collections.unmodifiableMap(book);
+	}
+
 	/** What a set of items is worth at the last settle's prices. */
 	public long value(Map<Integer, Long> items)
 	{
@@ -508,6 +771,341 @@ public final class Ledger
 		return null;
 	}
 
+	/**
+	 * Trims the ledger until its saved form fits the budget, giving up the least useful detail first:
+	 * items on old pages, then deals on recent ones, then trades of items long gone, then the oldest
+	 * worth history down to {@link #HISTORY_FLOOR} points. What is held, every day's totals and the worth
+	 * curve's shape are never given up, so a ledger whose holdings alone pass the budget stays over it,
+	 * and fitting it again on every save takes nothing more away.
+	 *
+	 * The ledger is measured by its saved form itself, so the last one measured is the one to save:
+	 * it is written out once more only for each step that took something away.
+	 *
+	 * @param json writes the ledger out as it stands
+	 * @param saved the ledger already written out as it stands, or null
+	 * @return the ledger written out after trimming
+	 */
+	public String fit(int budget, Function<Ledger, String> json, String saved)
+	{
+		String now = saved != null ? saved : json.apply(this);
+		for (int step = 0; now.length() > budget && step < SHRINK_STEPS; step++)
+		{
+			if (shrink(step))
+			{
+				now = json.apply(this);
+			}
+		}
+		return now;
+	}
+
+	private static final int SHRINK_STEPS = 5;
+	/** Worth points trimming always leaves: about a year of daily points beside the recent detail. */
+	static final int HISTORY_FLOOR = 400;
+
+	/** One step of trimming; true when it took anything away. */
+	private boolean shrink(int step)
+	{
+		int before = detail();
+		int closed = days.size() - 1;
+		switch (step)
+		{
+			case 0:
+				// Pages before the Trades page's reach keep their totals and nothing by item.
+				for (int i = 0; i < closed - 7; i++)
+				{
+					days.get(i).trim(0);
+					days.get(i).trimDeals(0);
+				}
+				break;
+			case 1:
+				for (int i = Math.max(0, closed - 7); i < closed; i++)
+				{
+					days.get(i).trim(Day.OLD_ITEMS);
+					days.get(i).trimDeals(Day.KEPT_DEALS / 3);
+				}
+				break;
+			case 2:
+				trimBook(BOOK / 3);
+				break;
+			case 3:
+				if (closed >= 0)
+				{
+					days.get(closed).trim(Day.KEPT_ITEMS * 2);
+				}
+				break;
+			default:
+				// Every other one of the oldest points of the worth history, never thinning it below a
+				// floor: a save over budget on every pass must not wear the curve away pass by pass.
+				int spare = history.size() - HISTORY_FLOOR;
+				if (spare > 0)
+				{
+					List<Point> thinned = new ArrayList<>();
+					for (int i = 0; i < history.size(); i++)
+					{
+						if (i == 0 || i == history.size() - 1 || i > 2 * spare || i % 2 == 0)
+						{
+							thinned.add(history.get(i));
+						}
+					}
+					history = thinned;
+				}
+				break;
+		}
+		return detail() != before;
+	}
+
+	/** A rough count of the trimmable detail, to tell whether a step took anything or the ledger has grown. */
+	int detail()
+	{
+		int n = history.size() + book.size() + days.size();
+		for (Day d : days)
+		{
+			n += d.getItems().size() + d.getDeals().size();
+		}
+		return n;
+	}
+
+	/** Keeps the trades of at most so many items: those still held first, then the most recently traded. */
+	private void trimBook(int keep)
+	{
+		if (book.size() <= keep)
+		{
+			return;
+		}
+		List<Map.Entry<Integer, Position>> old = new ArrayList<>(book.entrySet());
+		old.sort(Comparator.comparing((Map.Entry<Integer, Position> e) -> e.getValue().getHeld() > 0)
+			.thenComparingLong(e -> e.getValue().getTime()));
+		for (int i = 0; i < old.size() - keep; i++)
+		{
+			book.remove(old.get(i).getKey());
+		}
+	}
+
+	/**
+	 * Reads a saved ledger, or null when there is none or nothing in it can be read. A save damaged in
+	 * part (a field of the wrong type, a broken entry, a place a later version knows) gives up only
+	 * the part that is broken: the rest, the worth over time above all, is kept.
+	 */
+	public static Ledger read(Gson gson, String json)
+	{
+		if (json == null || json.trim().isEmpty())
+		{
+			return null;
+		}
+		Ledger read = parse(gson, json);
+		boolean partial = read == null;
+		if (read == null)
+		{
+			JsonElement root;
+			try
+			{
+				root = gson.fromJson(json, JsonElement.class);
+			}
+			catch (RuntimeException e)
+			{
+				// Cut short or not JSON at all: nothing can be told apart in it.
+				return null;
+			}
+			if (root == null || !root.isJsonObject())
+			{
+				return null;
+			}
+			JsonObject mended = new JsonObject();
+			for (Map.Entry<String, JsonElement> field : root.getAsJsonObject().entrySet())
+			{
+				JsonElement kept = salvage(gson, field.getKey(), field.getValue());
+				if (kept != null)
+				{
+					mended.add(field.getKey(), kept);
+				}
+			}
+			read = parse(gson, mended.toString());
+		}
+		if (read == null)
+		{
+			return null;
+		}
+		// Read without an error, a later version's fields (or a place only it knows, which reads as no place)
+		// are passed over in silence and would be lost at the next save: compared with what was saved.
+		read.mended = partial || read.stores != null && read.stores.containsKey(null) || !covers(tree(gson, json), toTree(gson, read));
+		return read.repair();
+	}
+
+	private static JsonElement tree(Gson gson, String json)
+	{
+		try
+		{
+			return gson.fromJson(json, JsonElement.class);
+		}
+		catch (RuntimeException | StackOverflowError e)
+		{
+			return null;
+		}
+	}
+
+	private static JsonElement toTree(Gson gson, Object value)
+	{
+		try
+		{
+			return gson.toJsonTree(value);
+		}
+		catch (RuntimeException | StackOverflowError e)
+		{
+			return null;
+		}
+	}
+
+	/**
+	 * True when every field and list entry in {@code saved} is still there in {@code reread}, the value
+	 * read from it written out again: nothing was passed over. Only the shape is compared, not the
+	 * figures, which reading may bring back to sense; a field saved as null was nothing to lose.
+	 */
+	static boolean covers(JsonElement saved, JsonElement reread)
+	{
+		if (saved == null || saved.isJsonNull())
+		{
+			return true;
+		}
+		if (reread == null || reread.isJsonNull())
+		{
+			return false;
+		}
+		if (saved.isJsonObject())
+		{
+			if (!reread.isJsonObject())
+			{
+				return false;
+			}
+			JsonObject now = reread.getAsJsonObject();
+			for (Map.Entry<String, JsonElement> field : saved.getAsJsonObject().entrySet())
+			{
+				if (!covers(field.getValue(), now.get(field.getKey())))
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+		if (saved.isJsonArray())
+		{
+			if (!reread.isJsonArray() || reread.getAsJsonArray().size() < saved.getAsJsonArray().size())
+			{
+				return false;
+			}
+			JsonArray then = saved.getAsJsonArray();
+			JsonArray now = reread.getAsJsonArray();
+			for (int i = 0; i < then.size(); i++)
+			{
+				if (!covers(then.get(i), now.get(i)))
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+		return true;
+	}
+
+	/**
+	 * True when this ledger was read from a save that could not be read whole: part of it was left
+	 * out, and the next save writes over it, so the save is set aside first.
+	 */
+	public boolean isMended()
+	{
+		return mended;
+	}
+
+	/**
+	 * Whether a save that could not be read whole should be set aside in place of the copy already
+	 * there, which is kept to just one: yes when there is none, and otherwise only for a save at least
+	 * as long, so a later stub (a ledger begun again, then damaged) never replaces a fuller copy.
+	 */
+	public static boolean setAside(String kept, String damaged)
+	{
+		if (damaged == null || damaged.trim().isEmpty() || damaged.length() > MAX_ASIDE)
+		{
+			return false;
+		}
+		return kept == null || kept.isEmpty() || !kept.equals(damaged) && damaged.length() >= kept.length();
+	}
+
+	private static Ledger parse(Gson gson, String json)
+	{
+		try
+		{
+			return gson.fromJson(json, Ledger.class);
+		}
+		catch (RuntimeException e)
+		{
+			return null;
+		}
+	}
+
+	/** True when a ledger holding just this one field reads. */
+	private static boolean reads(Gson gson, String key, JsonElement value)
+	{
+		JsonObject one = new JsonObject();
+		one.add(key, value);
+		return parse(gson, one.toString()) != null;
+	}
+
+	/**
+	 * What of one saved field can be read: all of it, or for a list or a map the entries that read on
+	 * their own (a place this version does not know is left out), or null for none.
+	 */
+	private static JsonElement salvage(Gson gson, String key, JsonElement value)
+	{
+		if (reads(gson, key, value))
+		{
+			return value;
+		}
+		if (value.isJsonArray())
+		{
+			JsonArray kept = new JsonArray();
+			for (JsonElement entry : value.getAsJsonArray())
+			{
+				JsonArray one = new JsonArray();
+				one.add(entry);
+				if (reads(gson, key, one))
+				{
+					kept.add(entry);
+				}
+			}
+			return reads(gson, key, kept) ? kept : null;
+		}
+		if (value.isJsonObject())
+		{
+			JsonObject kept = new JsonObject();
+			for (Map.Entry<String, JsonElement> entry : value.getAsJsonObject().entrySet())
+			{
+				if (key.equals("stores") && !isStore(entry.getKey()))
+				{
+					continue;
+				}
+				JsonObject one = new JsonObject();
+				one.add(entry.getKey(), entry.getValue());
+				if (reads(gson, key, one))
+				{
+					kept.add(entry.getKey(), entry.getValue());
+				}
+			}
+			return reads(gson, key, kept) ? kept : null;
+		}
+		return null;
+	}
+
+	private static boolean isStore(String name)
+	{
+		for (Store store : Store.values())
+		{
+			if (store.name().equals(name))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 	/** Mends a ledger read back from storage, where any part may be missing. */
 	public Ledger repair()
 	{
@@ -525,17 +1123,58 @@ public final class Ledger
 		{
 			history = new ArrayList<>();
 		}
-		history.removeIf(p -> p == null);
+		// No account is worth less than nothing, nor was before 1970: such a point is damage, not history.
+		history.removeIf(p -> p == null || p.t <= 0 || p.v < 0);
+		history.sort(Comparator.comparingLong(Point::getTime));
+		if (history.size() > History.MAX_POINTS)
+		{
+			// More than this version ever keeps (an old or damaged save): thinned as it would have been, so
+			// every copy and save after does not carry it all.
+			history = History.compact(history, history.get(history.size() - 1).t);
+		}
 		if (days == null)
 		{
 			days = new ArrayList<>();
 		}
-		days.removeIf(d -> d == null || d.getDate() == null);
+		Set<LocalDate> dated = new HashSet<>();
+		days.removeIf(d -> d == null || !dated.add(dateOf(d)));
+		days.removeIf(d -> dateOf(d) == null);
+		days.sort(Comparator.comparing(Ledger::dateOf));
+		for (Day day : days)
+		{
+			day.repair();
+		}
+		total = Math.max(0, total);
+		since = Math.max(0, since);
 		if (exchange == null)
 		{
 			exchange = new HashMap<>();
 		}
 		exchange.values().removeIf(o -> o == null);
+		if (book == null)
+		{
+			book = new HashMap<>();
+		}
+		book.values().removeIf(p -> p == null);
+		if (lost == null)
+		{
+			lost = new HashMap<>();
+		}
+		lost.keySet().removeIf(id -> id == null);
+		lost.values().removeIf(q -> q == null);
 		return this;
+	}
+
+	/** A page's date, or null when what was saved is not one. */
+	private static LocalDate dateOf(Day day)
+	{
+		try
+		{
+			return day.getDate() == null ? null : LocalDate.parse(day.getDate());
+		}
+		catch (java.time.DateTimeException e)
+		{
+			return null;
+		}
 	}
 }

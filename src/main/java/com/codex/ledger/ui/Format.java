@@ -12,61 +12,67 @@ public final class Format
 	private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("EEE d MMM", Locale.ENGLISH);
 	private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", Locale.ENGLISH);
 	private static final DateTimeFormatter SHORT = DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH);
+	private static final DateTimeFormatter LONG_DAY = DateTimeFormatter.ofPattern("EEE d MMM yyyy", Locale.ENGLISH);
 	private static final DateTimeFormatter MONTH = DateTimeFormatter.ofPattern("MMM yy", Locale.ENGLISH);
 
 	private Format()
 	{
 	}
 
-	/** "8,240", "41.2k", "412k", "1.24M". */
+	/**
+	 * Coins at one precision per unit, the same across the Codex plugins, so figures side by side read
+	 * alike: "8,240", "41k", "412k", "4.9M", "26.0M", "835.5M", "1.50B". Thousands are whole, millions
+	 * keep one decimal and billions two, zero or not ("26.0M", never "26M").
+	 */
 	public static String amount(long n)
 	{
 		if (n < 10_000)
 		{
 			return String.format(Locale.ENGLISH, "%,d", n);
 		}
-		if (n < 100_000)
-		{
-			return trim(n / 1_000.0, 1) + "k";
-		}
-		if (n < 1_000_000)
+		// A figure that rounds up to a thousand of one unit is written in the next ("1.0M", not "1000k").
+		if (n < 999_500)
 		{
 			return Math.round(n / 1_000.0) + "k";
 		}
-		if (n < 10_000_000)
+		if (n < 999_950_000)
 		{
-			return trim(n / 1_000_000.0, 2) + "M";
+			return fixed(n / 1_000_000.0, 1) + "M";
 		}
-		if (n < 1_000_000_000)
-		{
-			return trim(n / 1_000_000.0, 1) + "M";
-		}
-		if (n < 10_000_000_000L)
-		{
-			return trim(n / 1_000_000_000.0, 3) + "B";
-		}
-		return trim(n / 1_000_000_000.0, 2) + "B";
+		return fixed(n / 1_000_000_000.0, 2) + "B";
 	}
 
-	/** At most three figures, for tight columns: "8,240", "41.2k", "628M", "1.53B". */
-	public static String compact(long n)
+	/**
+	 * A round figure, a milestone or a target, by its name: "1M", "750M", "1B", "1.5B". Only these
+	 * drop the zeros after the point; any other figure is written by {@link #amount}.
+	 */
+	public static String mark(long n)
 	{
 		if (n < 10_000)
 		{
 			return String.format(Locale.ENGLISH, "%,d", n);
 		}
-		if (n < 1_000_000)
+		if (n < 999_500)
 		{
-			return n < 100_000 ? trim(n / 1_000.0, 1) + "k" : Math.round(n / 1_000.0) + "k";
+			return Math.round(n / 1_000.0) + "k";
 		}
-		if (n < 1_000_000_000)
+		if (n < 999_995_000)
 		{
-			return n < 10_000_000 ? trim(n / 1_000_000.0, 2) + "M" : n < 100_000_000 ? trim(n / 1_000_000.0, 1) + "M" : Math.round(n / 1_000_000.0) + "M";
+			return trim(n / 1_000_000.0, 2) + "M";
 		}
-		return n < 10_000_000_000L ? trim(n / 1_000_000_000.0, 2) + "B" : trim(n / 1_000_000_000.0, 1) + "B";
+		return trim(n / 1_000_000_000.0, 2) + "B";
 	}
 
-	/** A change with its sign, in at most three figures: "+628M". */
+	/**
+	 * For tight columns; the same as {@link #amount}, which is never wider than "999.9M", so a column
+	 * reads with the same places as the rest of the panel ("+4.9M", not "+4.90M" beside it).
+	 */
+	public static String compact(long n)
+	{
+		return amount(n);
+	}
+
+	/** A change with its sign, for tight columns: "+628.1M". */
 	public static String signedCompact(long gp)
 	{
 		return gp > 0 ? "+" + compact(gp) : gp < 0 ? "-" + compact(-gp) : "0";
@@ -84,20 +90,150 @@ public final class Format
 		return gp > 0 ? "+" + amount(gp) : gp < 0 ? "-" + amount(-gp) : "0";
 	}
 
+	/** A whole number written in full with thousands commas, whatever the computer's language: "1,240". */
+	public static String whole(long n)
+	{
+		return String.format(Locale.ENGLISH, "%,d", n);
+	}
+
+	/** Hours to one decimal place, with a full stop whatever the computer's language: "1.5 hours". */
+	public static String hours(double hours)
+	{
+		return String.format(Locale.ENGLISH, "%.1f", hours) + " hours";
+	}
+
 	/** A quantity change with its sign, written in full: "+1,240", "-6". */
 	public static String count(long n)
 	{
 		return (n > 0 ? "+" : n < 0 ? "-" : "") + String.format(Locale.ENGLISH, "%,d", Math.abs(n));
 	}
 
-	/** A share as a whole percent, or "<1%". */
+	/** A share as a whole percent, "<1%" for a sliver, and ">99%" when nearly all but not quite. */
 	public static String percent(double share)
 	{
 		if (share > 0 && share < 0.01)
 		{
 			return "<1%";
 		}
+		if (share >= 0.995 && share < 1)
+		{
+			// Rounded it reads 100%, which says "all of it" when some is still missing.
+			return ">99%";
+		}
 		return Math.round(share * 100) + "%";
+	}
+
+	/**
+	 * Each value's share of a whole as whole percents that add up as the values do: to 100% when the
+	 * values make the whole, never past it. Rounding each share on its own can give 101%; here the
+	 * points left over go to the shares that lost the most in rounding down. A share too small for a
+	 * point of its own reads "<1%", and a share beside one reads ">99%" rather than 100%, since the
+	 * two together cannot be more than all of it.
+	 *
+	 * @param whole what the shares are of; when the values add up to more, their sum is used instead
+	 */
+	public static String[] shares(long[] values, long whole)
+	{
+		int[] points = sharePoints(values, whole);
+		long sum = 0;
+		for (long v : values)
+		{
+			sum += Math.max(0, v);
+		}
+		long all = Math.max(whole, sum);
+		String[] out = new String[values.length];
+		for (int i = 0; i < values.length; i++)
+		{
+			// A share rounded up to 100% that is short of the whole (a sliver beside it, or the rest not
+			// listed) reads ">99%": only all of it is 100%.
+			out[i] = points[i] == 0 && values[i] > 0 ? "<1%" : points[i] >= 100 && values[i] < all ? ">99%" : points[i] + "%";
+		}
+		return out;
+	}
+
+	/** The whole percents {@link #shares} writes, as numbers. */
+	public static int[] sharePoints(long[] values, long whole)
+	{
+		long sum = 0;
+		for (long v : values)
+		{
+			sum += Math.max(0, v);
+		}
+		double denom = Math.max(whole, sum);
+		int[] points = new int[values.length];
+		if (denom <= 0)
+		{
+			return points;
+		}
+		double[] lost = new double[values.length];
+		int given = 0;
+		for (int i = 0; i < values.length; i++)
+		{
+			double exact = Math.max(0, values[i]) * 100 / denom;
+			points[i] = (int) Math.floor(exact);
+			lost[i] = exact - points[i];
+			given += points[i];
+		}
+		int target = (int) Math.round(sum * 100 / denom);
+		while (given < target)
+		{
+			int best = -1;
+			for (int i = 0; i < values.length; i++)
+			{
+				if (values[i] > 0 && (best < 0 || lost[i] > lost[best]))
+				{
+					best = i;
+				}
+			}
+			if (best < 0)
+			{
+				break;
+			}
+			points[best]++;
+			lost[best] = -1;
+			given++;
+		}
+		return points;
+	}
+
+	/** A return as a signed percent: "+26%", "-3.4%", "+0.8%". */
+	public static String signedPercent(double share)
+	{
+		double pct = share * 100;
+		String text = Math.abs(pct) < 10 ? trim(Math.abs(pct), 1) : String.valueOf(Math.round(Math.abs(pct)));
+		return (pct < 0 ? "-" : "+") + text + "%";
+	}
+
+	/** "1 item", "1,240 items". */
+	public static String plural(long n, String word)
+	{
+		return String.format(Locale.ENGLISH, "%,d", n) + " " + word + (n == 1 ? "" : "s");
+	}
+
+	/** "Sat 14 Feb 2027", for a day further off than the panel's own dates. */
+	public static String longDay(java.time.LocalDate date)
+	{
+		return LONG_DAY.format(date);
+	}
+
+	/** How long between two milestones: "the same day", "5 hours", "16 days", "3 months". */
+	public static String gap(long ms)
+	{
+		long hours = Math.max(0, ms) / 3_600_000L;
+		if (hours < 1)
+		{
+			return "under an hour";
+		}
+		if (hours < 24)
+		{
+			return plural(hours, "hour");
+		}
+		long days = hours / 24;
+		if (days < 90)
+		{
+			return plural(days, "day");
+		}
+		return plural(days / 30, "month");
 	}
 
 	/** "just now", "12m ago", "3h ago", "2d ago". */
@@ -117,6 +253,12 @@ public final class Format
 			return minutes / 60 + "h ago";
 		}
 		return minutes / (24 * 60) + "d ago";
+	}
+
+	/** A figure to exactly that many places, with a full stop whatever the computer's language. */
+	private static String fixed(double value, int places)
+	{
+		return String.format(Locale.ENGLISH, "%." + places + "f", value);
 	}
 
 	private static String trim(double value, int places)
@@ -180,7 +322,7 @@ public final class Format
 		return DATE.format(Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()));
 	}
 
-	/** An item stack the way the game writes it: "950", "45K", "12M". */
+	/** An item stack, shortened where the game shortens it, with the suite's lowercase k: "950", "45k", "12M". */
 	public static String stack(long n)
 	{
 		if (n < 100_000)
@@ -189,7 +331,7 @@ public final class Format
 		}
 		if (n < 10_000_000)
 		{
-			return n / 1_000 + "K";
+			return n / 1_000 + "k";
 		}
 		return n / 1_000_000 + "M";
 	}

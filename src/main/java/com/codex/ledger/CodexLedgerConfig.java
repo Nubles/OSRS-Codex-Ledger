@@ -3,6 +3,7 @@ package com.codex.ledger;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
+import net.runelite.client.config.Range;
 
 @ConfigGroup(CodexLedgerConfig.GROUP)
 public interface CodexLedgerConfig extends Config
@@ -12,7 +13,7 @@ public interface CodexLedgerConfig extends Config
 	@ConfigItem(
 		keyName = "loginSummary",
 		name = "Summary at login",
-		description = "When you log in, write your worth and what prices did while you were away in the chat box",
+		description = "When you log in, put a line in the chat box with your worth, today's change and how far it moved while you were away",
 		position = 0
 	)
 	default boolean loginSummary()
@@ -29,5 +30,39 @@ public interface CodexLedgerConfig extends Config
 	default boolean showPlaque()
 	{
 		return false;
+	}
+
+	@ConfigItem(
+		keyName = "goal",
+		name = "Worth goal (millions)",
+		description = "A worth to aim for in millions of coins (1500 is 1.5B), shown on the Worth page with when your pace gets you there; 0 aims at the next round figure",
+		position = 2
+	)
+	@Range(min = 0, max = 2_000_000)
+	default int goal()
+	{
+		return 0;
+	}
+
+	@ConfigItem(
+		keyName = "goalName",
+		name = "Goal name",
+		description = "What the goal is for, such as Twisted bow, shown with it on the Worth page and the ledger card",
+		position = 3
+	)
+	default String goalName()
+	{
+		return "";
+	}
+
+	@ConfigItem(
+		keyName = "nameOnCard",
+		name = "Name on cards",
+		description = "Write your character's name on the ledger card; turn off to share it without it",
+		position = 4
+	)
+	default boolean nameOnCard()
+	{
+		return true;
 	}
 }

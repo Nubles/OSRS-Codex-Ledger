@@ -10,4 +10,13 @@ public interface ItemIcons
 	 * @return the picture, possibly still blank, or null
 	 */
 	BufferedImage icon(int itemId, Runnable onLoaded);
+
+	/**
+	 * True when a picture this gave out is known to have arrived; a card waits for one that has not.
+	 * Pictures that are never late (previews, tests) have always arrived.
+	 */
+	default boolean hasArrived(BufferedImage image)
+	{
+		return true;
+	}
 }
