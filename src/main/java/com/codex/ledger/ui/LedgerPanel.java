@@ -293,6 +293,13 @@ public class LedgerPanel extends PluginPanel
 		}
 	}
 
+	/** When Bank Steward took its copy, as far as it can be told; a date to come is no date at all. */
+	static String copySeen(long savedAt, long now)
+	{
+		String seen = "Your bank as Bank Steward last saw it";
+		return savedAt > 0 && savedAt <= now + 60_000L ? seen + ", " + Format.ago(now - savedAt) : seen;
+	}
+
 	/** Picks the worth chart's range, for previews and tests. */
 	public void showRange(int index)
 	{
@@ -414,8 +421,7 @@ public class LedgerPanel extends PluginPanel
 				if (e != null)
 				{
 					stack.add(new SectionHeader("Bank Steward's copy", Format.coins(e.getBank())));
-					String seen = e.getSavedAt() > 0 ? "Your bank as Bank Steward last saw it, " + Format.ago(now - e.getSavedAt()) : "Your bank as Bank Steward last saw it";
-					stack.add(Ui.wrapped(seen + ": " + Format.plural(e.getKinds(), "kind") + " of item."
+					stack.add(Ui.wrapped(copySeen(e.getSavedAt(), now) + ": " + Format.plural(e.getKinds(), "kind") + " of item."
 						+ (e.isTruncated() ? " A bank this large is only partly copied, so the estimate runs low." : "")
 						+ " Nothing in it is booked: the ledger starts from your real bank.", Theme.small(), Theme.TEXT_MUTED, WIDTH - 10));
 				}

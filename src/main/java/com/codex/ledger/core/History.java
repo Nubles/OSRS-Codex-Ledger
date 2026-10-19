@@ -53,9 +53,9 @@ public final class History
 				kept.add(p);
 			}
 		}
-		while (kept.size() > MAX_POINTS)
+		if (kept.size() > MAX_POINTS)
 		{
-			kept.remove(0);
+			kept.subList(0, kept.size() - MAX_POINTS).clear();
 		}
 		return kept;
 	}

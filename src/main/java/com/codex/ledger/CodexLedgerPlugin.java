@@ -21,14 +21,11 @@ import com.codex.ledger.ui.LedgerPanel;
 import com.codex.ledger.ui.ShareActions;
 import com.codex.ledger.ui.Sigil;
 import com.google.gson.Gson;
-import com.google.gson.JsonParseException;
-import com.google.gson.reflect.TypeToken;
 import com.google.inject.Provides;
 import java.awt.Toolkit;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.lang.reflect.Type;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -97,14 +94,13 @@ public class CodexLedgerPlugin extends Plugin
 {
 	private static final Logger log = LoggerFactory.getLogger(CodexLedgerPlugin.class);
 	private static final String LEDGER_KEY = "ledger";
+	/** Where a save that could not be read at all is set aside, untouched, before the ledger starts afresh. */
+	static final String DAMAGED_KEY = "ledgerUnreadable";
 	/** Characters the saved ledger may take before its oldest detail is trimmed; a typical account saves 40-120k. */
 	private static final int SAVE_BUDGET = 200_000;
 	/** Codex Session Chronicle's group and journal key, read and never written, for what pays. */
 	static final String CHRONICLE_GROUP = "codexsessionchronicle";
 	static final String CHRONICLE_JOURNAL = "journal";
-	private static final Type CHRONICLE_TYPE = new TypeToken<List<Earnings.Logged>>()
-	{
-	}.getType();
 	private final Saver saver = new Saver(SAVE_BUDGET);
 	/** Ticks between revaluing what is held, about a minute. */
 	private static final int REVALUE_TICKS = 100;
@@ -677,18 +673,17 @@ public class CodexLedgerPlugin extends Plugin
 		{
 			return;
 		}
-		try
+		String saved = configManager.getRSProfileConfiguration(CodexLedgerConfig.GROUP, LEDGER_KEY);
+		ledger = Ledger.read(gson, saved);
+		if (ledger == null && saved != null && !saved.trim().isEmpty())
 		{
-			String saved = configManager.getRSProfileConfiguration(CodexLedgerConfig.GROUP, LEDGER_KEY);
-			if (saved != null && !saved.isEmpty())
+			// Nothing in it could be read. The ledger starts afresh, but the old save is set aside first
+			// (once, never over an earlier one) so the next save does not write over the only copy.
+			log.warn("Could not read the saved ledger; it is kept as {} and the ledger starts afresh", DAMAGED_KEY);
+			if (configManager.getRSProfileConfiguration(CodexLedgerConfig.GROUP, DAMAGED_KEY) == null)
 			{
-				Ledger read = gson.fromJson(saved, Ledger.class);
-				ledger = read == null ? null : read.repair();
+				configManager.setConfiguration(CodexLedgerConfig.GROUP, profile, DAMAGED_KEY, saved);
 			}
-		}
-		catch (JsonParseException e)
-		{
-			log.warn("Could not read the saved ledger, starting it afresh", e);
 		}
 		if (ledger == null)
 		{
@@ -876,16 +871,8 @@ public class CodexLedgerPlugin extends Plugin
 		{
 			return;
 		}
-		try
-		{
-			List<Earnings.Logged> read = gson.fromJson(json, CHRONICLE_TYPE);
-			chronicle = read == null ? Collections.emptyList() : read;
-		}
-		catch (RuntimeException e)
-		{
-			// Another plugin's format may change under us; without it there is simply no "what pays".
-			log.debug("Could not read Codex Session Chronicle's journal", e);
-		}
+		// Another plugin's format may change under us; without it there is simply no "what pays".
+		chronicle = Earnings.read(gson, json);
 	}
 
 	/** An item's high alchemy value, asked on the client thread and kept; 0 for an item that cannot be alched. */

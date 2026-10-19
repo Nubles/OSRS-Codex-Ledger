@@ -62,13 +62,14 @@ public final class BankCopy
 				Long qty = number(e.getValue());
 				if (id != null && id > 0 && qty != null && qty > 0 && items.size() < MAX_ITEMS)
 				{
-					items.put(id, qty);
+					// No stack in the game holds more than this, whatever the copy claims.
+					items.put(id, Math.min(qty, Integer.MAX_VALUE));
 				}
 			}
 			Long savedAt = number(o.get("savedAt"));
 			JsonElement cut = o.get("truncated");
 			boolean truncated = cut != null && cut.isJsonPrimitive() && cut.getAsJsonPrimitive().isBoolean() && cut.getAsBoolean();
-			return items.isEmpty() ? null : new BankCopy(items, savedAt == null ? 0 : savedAt, truncated);
+			return items.isEmpty() ? null : new BankCopy(items, savedAt == null || savedAt < 0 ? 0 : savedAt, truncated);
 		}
 		catch (JsonParseException | IllegalStateException | UnsupportedOperationException | NumberFormatException e)
 		{
@@ -103,10 +104,12 @@ public final class BankCopy
 		long total = 0;
 		for (Map.Entry<Integer, Long> e : items.entrySet())
 		{
-			long price = prices.price(e.getKey());
+			// Each figure is at most a stack's or an item's top price, so the product fits; the sum is held at its ceiling.
+			long price = Math.min(prices.price(e.getKey()), Integer.MAX_VALUE);
 			if (price > 0)
 			{
-				total += price * e.getValue();
+				long worth = price * e.getValue();
+				total = total > Long.MAX_VALUE - worth ? Long.MAX_VALUE : total + worth;
 			}
 		}
 		return total;

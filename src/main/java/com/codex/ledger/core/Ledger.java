@@ -1,5 +1,9 @@
 package com.codex.ledger.core;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -873,6 +877,125 @@ public final class Ledger
 		}
 	}
 
+	/**
+	 * Reads a saved ledger, or null when there is none or nothing in it can be read. A save damaged in
+	 * part (a field of the wrong type, a broken entry, a place a later version knows) gives up only
+	 * the part that is broken: the rest, the worth over time above all, is kept.
+	 */
+	public static Ledger read(Gson gson, String json)
+	{
+		if (json == null || json.trim().isEmpty())
+		{
+			return null;
+		}
+		Ledger read = parse(gson, json);
+		if (read == null)
+		{
+			JsonElement root;
+			try
+			{
+				root = gson.fromJson(json, JsonElement.class);
+			}
+			catch (RuntimeException e)
+			{
+				// Cut short or not JSON at all: nothing can be told apart in it.
+				return null;
+			}
+			if (root == null || !root.isJsonObject())
+			{
+				return null;
+			}
+			JsonObject mended = new JsonObject();
+			for (Map.Entry<String, JsonElement> field : root.getAsJsonObject().entrySet())
+			{
+				JsonElement kept = salvage(gson, field.getKey(), field.getValue());
+				if (kept != null)
+				{
+					mended.add(field.getKey(), kept);
+				}
+			}
+			read = parse(gson, mended.toString());
+		}
+		return read == null ? null : read.repair();
+	}
+
+	private static Ledger parse(Gson gson, String json)
+	{
+		try
+		{
+			return gson.fromJson(json, Ledger.class);
+		}
+		catch (RuntimeException e)
+		{
+			return null;
+		}
+	}
+
+	/** True when a ledger holding just this one field reads. */
+	private static boolean reads(Gson gson, String key, JsonElement value)
+	{
+		JsonObject one = new JsonObject();
+		one.add(key, value);
+		return parse(gson, one.toString()) != null;
+	}
+
+	/**
+	 * What of one saved field can be read: all of it, or for a list or a map the entries that read on
+	 * their own (a place this version does not know is left out), or null for none.
+	 */
+	private static JsonElement salvage(Gson gson, String key, JsonElement value)
+	{
+		if (reads(gson, key, value))
+		{
+			return value;
+		}
+		if (value.isJsonArray())
+		{
+			JsonArray kept = new JsonArray();
+			for (JsonElement entry : value.getAsJsonArray())
+			{
+				JsonArray one = new JsonArray();
+				one.add(entry);
+				if (reads(gson, key, one))
+				{
+					kept.add(entry);
+				}
+			}
+			return reads(gson, key, kept) ? kept : null;
+		}
+		if (value.isJsonObject())
+		{
+			JsonObject kept = new JsonObject();
+			for (Map.Entry<String, JsonElement> entry : value.getAsJsonObject().entrySet())
+			{
+				if (key.equals("stores") && !isStore(entry.getKey()))
+				{
+					continue;
+				}
+				JsonObject one = new JsonObject();
+				one.add(entry.getKey(), entry.getValue());
+				if (reads(gson, key, one))
+				{
+					kept.add(entry.getKey(), entry.getValue());
+				}
+			}
+			return reads(gson, key, kept) ? kept : null;
+		}
+		return null;
+	}
+
+	private static boolean isStore(String name)
+	{
+		for (Store store : Store.values())
+		{
+			if (store.name().equals(name))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 	/** Mends a ledger read back from storage, where any part may be missing. */
 	public Ledger repair()
 	{
@@ -890,12 +1013,29 @@ public final class Ledger
 		{
 			history = new ArrayList<>();
 		}
-		history.removeIf(p -> p == null);
+		// No account is worth less than nothing, nor was before 1970: such a point is damage, not history.
+		history.removeIf(p -> p == null || p.t <= 0 || p.v < 0);
+		history.sort(Comparator.comparingLong(Point::getTime));
+		if (history.size() > History.MAX_POINTS)
+		{
+			// More than this version ever keeps (an old or damaged save): thinned as it would have been, so
+			// every copy and save after does not carry it all.
+			history = History.compact(history, history.get(history.size() - 1).t);
+		}
 		if (days == null)
 		{
 			days = new ArrayList<>();
 		}
-		days.removeIf(d -> d == null || d.getDate() == null);
+		Set<LocalDate> dated = new HashSet<>();
+		days.removeIf(d -> d == null || !dated.add(dateOf(d)));
+		days.removeIf(d -> dateOf(d) == null);
+		days.sort(Comparator.comparing(Ledger::dateOf));
+		for (Day day : days)
+		{
+			day.repair();
+		}
+		total = Math.max(0, total);
+		since = Math.max(0, since);
 		if (exchange == null)
 		{
 			exchange = new HashMap<>();
@@ -910,6 +1050,21 @@ public final class Ledger
 		{
 			lost = new HashMap<>();
 		}
+		lost.keySet().removeIf(id -> id == null);
+		lost.values().removeIf(q -> q == null);
 		return this;
+	}
+
+	/** A page's date, or null when what was saved is not one. */
+	private static LocalDate dateOf(Day day)
+	{
+		try
+		{
+			return day.getDate() == null ? null : LocalDate.parse(day.getDate());
+		}
+		catch (java.time.DateTimeException e)
+		{
+			return null;
+		}
 	}
 }

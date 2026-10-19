@@ -254,6 +254,27 @@ public final class Day
 		deals = kept;
 	}
 
+	/** Mends a page read back from storage, where any part may be missing. */
+	void repair()
+	{
+		if (items == null)
+		{
+			items = new HashMap<>();
+		}
+		items.keySet().removeIf(id -> id == null);
+		items.values().removeIf(f -> f == null);
+		if (deals == null)
+		{
+			deals = new HashMap<>();
+		}
+		deals.keySet().removeIf(id -> id == null);
+		deals.values().removeIf(d -> d == null);
+		if (trades == null)
+		{
+			trades = new Deal();
+		}
+	}
+
 	public String getDate()
 	{
 		return date;

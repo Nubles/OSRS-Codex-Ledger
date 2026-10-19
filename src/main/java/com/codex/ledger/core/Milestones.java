@@ -15,6 +15,7 @@ public final class Milestones
 {
 	/** Milestones kept, the newest. */
 	public static final int KEPT = 3;
+	private static final long BILLION = 1_000_000_000L;
 
 	/** One figure passed. */
 	public static final class Mark
@@ -101,6 +102,12 @@ public final class Milestones
 		for (Ledger.Point p : points)
 		{
 			peak = Math.max(peak, p.getValue());
+			if (p.getValue() >= target && p.getValue() / BILLION - target / BILLION > KEPT)
+			{
+				// Past a billion the figures come every billion; a leap over thousands of them (only ever
+				// a damaged save) marks just the last few, which are all that is kept.
+				target = Math.max(target, (p.getValue() / BILLION - KEPT + 1) * BILLION);
+			}
 			// One point can pass several figures at once, a big drop or a sale, say: each is marked then.
 			while (p.getValue() >= target && target != Long.MAX_VALUE)
 			{
