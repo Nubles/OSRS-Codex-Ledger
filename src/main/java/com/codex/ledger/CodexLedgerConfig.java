@@ -54,4 +54,15 @@ public interface CodexLedgerConfig extends Config
 	{
 		return "";
 	}
+
+	@ConfigItem(
+		keyName = "nameOnCard",
+		name = "Name on cards",
+		description = "Write your character's name on the ledger card; turn off to share it without it",
+		position = 4
+	)
+	default boolean nameOnCard()
+	{
+		return true;
+	}
 }

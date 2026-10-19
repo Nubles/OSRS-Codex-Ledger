@@ -172,6 +172,7 @@ public class LedgerPanel extends PluginPanel
 	/** A line under the card's buttons after saving or copying; cleared when another account opens. */
 	private String shareNote;
 	private String player;
+	private boolean showName = true;
 
 	/**
 	 * Called on the Swing thread whenever the ledger changes.
@@ -230,6 +231,12 @@ public class LedgerPanel extends PluginPanel
 	public void setGoal(Goal goal)
 	{
 		this.goal = goal;
+	}
+
+	/** Whether the ledger card carries the character's name, from the settings; used when the card is next drawn. */
+	public void setShowName(boolean showName)
+	{
+		this.showName = showName;
 	}
 
 	/** What the ledger card's Save and Copy buttons do. */
@@ -673,7 +680,7 @@ public class LedgerPanel extends PluginPanel
 	/** The statement as it stands, or null while there is nothing to share. */
 	private LedgerCard.Statement statement()
 	{
-		return LedgerCard.Statement.of(ledger, names, player, today(), now, zone, goal.amount, goal.name, earnings);
+		return LedgerCard.Statement.of(ledger, names, showName ? player : null, today(), now, zone, goal.amount, goal.name, earnings);
 	}
 
 	private void saveCard()

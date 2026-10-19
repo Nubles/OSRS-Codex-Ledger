@@ -1,10 +1,13 @@
 package com.codex.ledger.ui;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import net.runelite.client.callback.ClientThread;
+import net.runelite.client.util.AsyncBufferedImage;
 import org.junit.Test;
 
 public class IconWatchTest
@@ -93,5 +96,68 @@ public class IconWatchTest
 		watch.watch(picture, null, picture::onLoaded);
 		picture.load();
 		assertTrue(watch.hasArrived(picture));
+	}
+
+	/** Holds what RuneLite would run later on the client thread, so a test can run it. */
+	private static final class Later extends ClientThread
+	{
+		final List<Runnable> queued = new ArrayList<>();
+
+		@Override
+		public void invokeLater(Runnable r)
+		{
+			queued.add(r);
+		}
+
+		void run()
+		{
+			List<Runnable> now = new ArrayList<>(queued);
+			queued.clear();
+			now.forEach(Runnable::run);
+		}
+	}
+
+	@Test
+	public void aFreshPictureForTheSameItemIsWatchedAgain()
+	{
+		// ItemManager keeps only so many item pictures; after one is dropped, asking for the same item
+		// hands out a new blank picture that loads later. It must be watched, not taken as arrived.
+		Later clientThread = new Later();
+		IconWatch watch = new IconWatch();
+		int[] repaints = {0};
+		AsyncBufferedImage first = new AsyncBufferedImage(clientThread, 36, 32, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+		watch.watch(first, () -> repaints[0]++, first::onLoaded);
+		first.loaded();
+		assertEquals(1, repaints[0]);
+		watch.watch(first, () -> repaints[0]++, first::onLoaded);
+		clientThread.run();
+		assertEquals(1, repaints[0]);
+
+		AsyncBufferedImage again = new AsyncBufferedImage(clientThread, 36, 32, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+		assertFalse(watch.hasArrived(again));
+		watch.watch(again, () -> repaints[0]++, again::onLoaded);
+		again.loaded();
+		assertEquals(2, repaints[0]);
+		assertTrue(watch.hasArrived(again));
+		assertTrue(watch.hasArrived(first));
+	}
+
+	@Test
+	public void aDroppedPictureIsNotHeldOn()
+	{
+		IconWatch watch = new IconWatch();
+		Later clientThread = new Later();
+		AsyncBufferedImage picture = new AsyncBufferedImage(clientThread, 36, 32, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+		watch.watch(picture, null, picture::onLoaded);
+		picture.loaded();
+		assertEquals(1, watch.size());
+		picture = null;
+		for (int i = 0; i < 50 && watch.size() > 0; i++)
+		{
+			System.gc();
+			byte[] churn = new byte[1 << 20];
+			churn[0] = 1;
+		}
+		assertEquals(0, watch.size());
 	}
 }

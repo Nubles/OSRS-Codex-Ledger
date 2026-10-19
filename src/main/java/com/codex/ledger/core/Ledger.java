@@ -360,6 +360,14 @@ public final class Ledger
 			if (foundValue != 0)
 			{
 				day.found(foundValue);
+				// The worth history takes it as opening balance too, so the chart, the week's change and the
+				// milestones do not read a place opened for the first time as worth gained.
+				List<Point> shifted = new ArrayList<>(history.size());
+				for (Point p : history)
+				{
+					shifted.add(new Point(p.getTime(), p.getValue() + foundValue));
+				}
+				history = shifted;
 			}
 			day.totals(play, drift, worth);
 			if (byKind != null)

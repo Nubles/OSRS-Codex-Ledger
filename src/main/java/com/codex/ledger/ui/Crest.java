@@ -145,6 +145,11 @@ public class Crest extends JComponent
 		g.setFont(Theme.small());
 		FontMetrics small = g.getFontMetrics();
 		String heading = (player != null ? player + "  \u00b7  " : "") + "NET WORTH";
+		if (player != null && small.stringWidth(heading) > room)
+		{
+			// A long name keeps its room rather than ending in a clipped "NET W...".
+			heading = player;
+		}
 		g.setColor(Theme.TEXT_MUTED);
 		g.drawString(Ui.clip(heading, small, room), tx, 22);
 

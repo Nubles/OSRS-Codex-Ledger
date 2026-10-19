@@ -404,7 +404,7 @@ public class CodexLedgerPlugin extends Plugin
 		if (CodexLedgerConfig.GROUP.equals(event.getGroup()) && event.getProfile() == null)
 		{
 			plaque.setEnabled(config.showPlaque());
-			if ("goal".equals(event.getKey()) || "goalName".equals(event.getKey()))
+			if ("goal".equals(event.getKey()) || "goalName".equals(event.getKey()) || "nameOnCard".equals(event.getKey()))
 			{
 				clientThread.invokeLater(this::publish);
 			}
@@ -807,9 +807,11 @@ public class CodexLedgerPlugin extends Plugin
 		String name = loggedIn && player != null ? player.getName() : null;
 		LedgerPanel.State state = !loggedIn ? LedgerPanel.State.LOGGED_OUT : copy.isReady() ? LedgerPanel.State.READY : LedgerPanel.State.WAITING_FOR_BANK;
 		LedgerPanel.Goal goal = new LedgerPanel.Goal(Math.max(0, config.goal()) * 1_000_000L, config.goalName());
+		boolean nameOnCard = config.nameOnCard();
 		SwingUtilities.invokeLater(() ->
 		{
 			target.setGoal(goal);
+			target.setShowName(nameOnCard);
 			target.setAlchemy(alchemy);
 			target.setEarnings(earnings);
 			target.setEstimate(guess);

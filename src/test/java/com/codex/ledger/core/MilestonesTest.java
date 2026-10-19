@@ -77,4 +77,26 @@ public class MilestonesTest
 		assertEquals(1_000_000L, m.getNext());
 		assertEquals(1_000_000L, m.getToGo());
 	}
+
+	@Test
+	public void aPlaceSeenForTheFirstTimePassesNoFigure()
+	{
+		// 90M in the bank, then a seed vault opened for the first time holding 20M: opening balance, as the
+		// day book counts it, so the worth did not pass 100M while the ledger watched.
+		java.util.Map<Integer, Long> price = new java.util.HashMap<>();
+		price.put(995, 1L);
+		price.put(5295, 20_000L);
+		Prices prices = id -> price.getOrDefault(id, 0L);
+		java.time.ZoneId utc = java.time.ZoneOffset.UTC;
+		Ledger ledger = new Ledger();
+		ledger.observe(Store.BANK, Collections.singletonMap(995, 90_000_000L));
+		ledger.settle(DAY + DAY / 2, prices, utc);
+		ledger.observe(Store.SEED_VAULT, Collections.singletonMap(5295, 1_000L));
+		ledger.settle(DAY + DAY / 2 + 3 * 3_600_000L, prices, utc);
+		assertEquals(110_000_000L, ledger.getTotal());
+		Milestones m = Milestones.of(ledger.getHistory(), ledger.getTotal(), DAY + DAY / 2 + 4 * 3_600_000L);
+		assertTrue(m.getPassed().isEmpty());
+		assertEquals(250_000_000L, m.getNext());
+		assertFalse(m.isRegain());
+	}
 }
