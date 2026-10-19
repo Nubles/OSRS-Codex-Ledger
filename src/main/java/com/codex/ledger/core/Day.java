@@ -188,6 +188,11 @@ public final class Day
 		{
 			return;
 		}
+		if (keep <= 0)
+		{
+			deals = new HashMap<>();
+			return;
+		}
 		List<Map.Entry<Integer, Deal>> list = new ArrayList<>(deals.entrySet());
 		list.sort(Comparator.comparingLong((Map.Entry<Integer, Deal> e) -> e.getValue().weight()).reversed());
 		Map<Integer, Deal> kept = new HashMap<>();

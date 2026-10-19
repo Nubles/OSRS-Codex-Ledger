@@ -398,7 +398,7 @@ public class LedgerPanel extends PluginPanel
 		String left = Format.coins(f.remaining()) + " to go. ";
 		if (!f.hasPace())
 		{
-			return left + "A pace appears after " + Forecast.WINDOW / 10 + " days of pages.";
+			return left + "A pace appears after " + Forecast.MIN_DAYS + " days of pages.";
 		}
 		String pace = Format.signed(Math.round(f.getPerDay())) + " a day over " + f.getDays() + " days";
 		if (f.getPerDay() <= 0)

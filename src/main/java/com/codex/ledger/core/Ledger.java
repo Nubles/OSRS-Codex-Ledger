@@ -35,8 +35,13 @@ public final class Ledger
 	static final int LOOTING_BAG_OPEN = 22586;
 	/** Items whose trades are remembered at most; those no longer held and traded longest ago go first. */
 	static final int BOOK = 300;
-	/** How long after dying items leaving the account are lost to the death rather than used. */
-	static final long DYING_MS = 30_000;
+	/**
+	 * How long after dying items leaving the account are lost to the death rather than used. The
+	 * game takes them when the player is sent home, a few ticks after the death itself.
+	 */
+	static final long DYING_MS = 15_000;
+	/** Pages whose deals by item are kept: the Trades page reaches back 30 days, older pages keep their day's totals. */
+	static final int DEAL_DAYS = 30;
 	/** How long after dying getting the same items back counts against that death. */
 	static final long REGAIN_MS = 6 * 3_600_000L;
 
@@ -64,6 +69,8 @@ public final class Ledger
 	private transient Map<Integer, Offer> pendingOffers;
 	private transient boolean atExchange;
 	private transient long dyingUntil;
+	/** Set when the death took something at this settle; the death is then over and what goes after is used, not lost. */
+	private transient boolean tookByDeath;
 	/** Trades seen at the last settle of the exchange. */
 	private transient List<Fill> fills;
 
@@ -424,6 +431,7 @@ public final class Ledger
 		{
 			day.channel(Channel.DEATHS, own * price);
 			lost.merge(id, -own, Long::sum);
+			tookByDeath = true;
 			return;
 		}
 		if (own > 0 && now <= lostUntil && lost.containsKey(id))
@@ -459,6 +467,11 @@ public final class Ledger
 		if (now > lostUntil && !lost.isEmpty())
 		{
 			lost.clear();
+		}
+		if (tookByDeath)
+		{
+			tookByDeath = false;
+			dyingUntil = 0;
 		}
 		for (Fill f : fills)
 		{
@@ -578,6 +591,10 @@ public final class Ledger
 		}
 		Day day = new Day(date, total);
 		days.add(day);
+		if (days.size() > DEAL_DAYS)
+		{
+			days.get(days.size() - 1 - DEAL_DAYS).trimDeals(0);
+		}
 		while (days.size() > DAYS)
 		{
 			days.remove(0);

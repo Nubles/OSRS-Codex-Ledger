@@ -215,6 +215,35 @@ public class TradesTest
 	}
 
 	@Test
+	public void aSafeDeathEndsWithWhatItTookAndDoesNotTakeTheSuppliesAfter()
+	{
+		ledger.died(now);
+		ledger.observe(Store.INVENTORY, items(SHARK, 4));
+		settle();
+		assertEquals(-4_800, today().channel(Channel.DEATHS));
+		// Eating a shark a moment later is supplies.
+		ledger.observe(Store.INVENTORY, items(SHARK, 3));
+		settle();
+		assertEquals(-800, today().channel(Channel.USED));
+		assertEquals(-4_800, today().channel(Channel.DEATHS));
+	}
+
+	@Test
+	public void pagesBeyondAMonthKeepOnlyTheirTradeTotals()
+	{
+		buySharks();
+		for (int d = 1; d <= Ledger.DEAL_DAYS; d++)
+		{
+			now = T0 + d * DAY;
+			settle();
+		}
+		Day first = ledger.getDays().get(0);
+		assertTrue(first.getDeals().isEmpty());
+		assertEquals(700_000, first.getTrades().getBuyCoins());
+		assertEquals(700_000, Trades.of(ledger, 0, D0.plusDays(Ledger.DEAL_DAYS)).getTotal().getBuyCoins());
+	}
+
+	@Test
 	public void coinsComingAndGoingAreTheirOwnChannels()
 	{
 		// A shop: coins out, sharks in; then an alch: a whip out, coins in.

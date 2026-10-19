@@ -13,7 +13,7 @@ public final class Forecast
 	/** Days the pace is taken over. */
 	public static final int WINDOW = 30;
 	/** Days of pages needed before a pace means anything. */
-	static final int MIN_DAYS = 3;
+	public static final int MIN_DAYS = 3;
 	/** Further than this and the date says nothing useful. */
 	static final long HORIZON_DAYS = 3_650;
 	/** Round figures to aim at when no goal is set. */
