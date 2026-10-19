@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import javax.swing.BoxLayout;
 import javax.swing.JComponent;
+import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.ScrollPaneConstants;
@@ -342,11 +343,16 @@ public class LedgerPanel extends PluginPanel
 				worst = d;
 			}
 		}
-		JPanel tiles = new JPanel(new GridLayout(2, 2, 6, 6));
+		boolean timed = report.getPlayedMs() > 0;
+		JPanel tiles = new JPanel(new GridLayout(timed ? 3 : 2, 2, 6, 6));
 		tiles.setOpaque(false);
 		String when = RANGE_NOTES[r];
 		tiles.add(new StatTile(Format.signed(report.getPlay()), "Play", when, Theme.signed(report.getPlay())));
 		tiles.add(new StatTile(Format.signed(report.getMarket()), "Market", when, report.getMarket() >= 0 ? Theme.MARKET : Theme.EMBER));
+		if (timed)
+		{
+			hourTiles(tiles, report);
+		}
 		Day today = ledger.day(today());
 		if (r == 0 && today != null)
 		{
@@ -355,6 +361,7 @@ public class LedgerPanel extends PluginPanel
 			tiles.add(new StatTile(Format.coins(today.getLow()), "Low", "today", Theme.GOLD));
 			stack.add(tiles);
 			goal(stack);
+			kinds(stack, report, "today");
 			whereKept(stack);
 			replace(worth, stack);
 			return;
@@ -365,8 +372,70 @@ public class LedgerPanel extends PluginPanel
 			worst == null ? "" : Format.day(LocalDate.parse(worst.getDate())), worst == null ? Theme.TEXT_MUTED : Theme.signed(worst.change())));
 		stack.add(tiles);
 		goal(stack);
+		kinds(stack, report, RANGE_NOTES[r]);
 		whereKept(stack);
 		replace(worth, stack);
+	}
+
+	/** Play an hour logged in, and the time it was made in. */
+	private static void hourTiles(JPanel tiles, Report report)
+	{
+		String hourly = report.hasHourly() ? Format.signed(report.perHour()) : "-";
+		tiles.add(new StatTile(hourly, "Per hour", report.hasHourly() ? "of play logged in" : "after 10 minutes",
+			report.hasHourly() ? Theme.signed(report.perHour()) : Theme.TEXT_MUTED));
+		tiles.add(new StatTile(Format.duration(report.getPlayedMs()), "Logged in", report.getDays() == 1 ? "today" : "over "
+			+ Format.plural(report.getDays(), "day"), Theme.GOLD));
+	}
+
+	/** What the worth is made of, and how each kind moved over the span. */
+	private void kinds(StackPanel stack, Report report, String when)
+	{
+		long[] kinds = report.getKinds();
+		if (kinds == null)
+		{
+			return;
+		}
+		long[] change = report.kindChange();
+		stack.add(new SectionHeader("What it is", change == null ? "" : "change " + when));
+		stack.add(new KindBreakdown(kinds, change));
+		String moved = kindStory(kinds, change);
+		if (moved != null)
+		{
+			stack.add(Ui.wrapped(moved, Theme.small(), Theme.TEXT_FAINT, WIDTH - 10));
+		}
+	}
+
+	/**
+	 * One plain sentence when coins clearly turned into gear or back, the move a player makes on purpose
+	 * and likes to see named: "About 48.2M in coins went into gear."
+	 */
+	static String kindStory(long[] kinds, long[] change)
+	{
+		if (change == null)
+		{
+			return null;
+		}
+		long cash = change[com.codex.ledger.core.Kind.CASH.ordinal()];
+		long gear = change[com.codex.ledger.core.Kind.GEAR.ordinal()];
+		long total = 0;
+		for (long v : kinds)
+		{
+			total += Math.max(0, v);
+		}
+		long amount = Math.min(Math.abs(cash), Math.abs(gear));
+		if (amount < Math.max(1_000_000, total / 100))
+		{
+			return null;
+		}
+		if (cash < 0 && gear > 0)
+		{
+			return "About " + Format.coins(amount) + " in coins went into gear.";
+		}
+		if (cash > 0 && gear < 0)
+		{
+			return "About " + Format.coins(amount) + " of gear was turned back into coins.";
+		}
+		return null;
 	}
 
 	/** The worth goal, or the next round figure, with how far along it is and when it falls at this pace. */
@@ -568,6 +637,14 @@ public class LedgerPanel extends PluginPanel
 		top.add(Ui.label(Format.signed(report.change()), Theme.title(), Theme.signed(report.change())), BorderLayout.EAST);
 		head.add(top, BorderLayout.NORTH);
 		head.add(new SplitRows(report.getPlay(), report.getMarket()), BorderLayout.CENTER);
+		if (report.getPlayedMs() > 0)
+		{
+			String line = Format.duration(report.getPlayedMs()) + " logged in"
+				+ (report.hasHourly() ? " · " + Format.signed(report.perHour()) + "/hr" : "");
+			JLabel label = Ui.label(line, Theme.small(), Theme.TEXT_MUTED);
+			label.setToolTipText("Play an hour logged in: what playing made or spent, prices moving left out.");
+			head.add(label, BorderLayout.SOUTH);
+		}
 		stack.add(head);
 		whereItWent(stack, report);
 

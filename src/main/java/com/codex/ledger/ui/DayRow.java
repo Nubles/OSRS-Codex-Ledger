@@ -90,6 +90,16 @@ class DayRow extends JComponent
 		FontMetrics small = g.getFontMetrics();
 		g.setColor(Theme.TEXT_FAINT);
 		g.drawString("closed " + Format.coins(day.getClose()), 10, h - 13);
+		if (day.getPlayedMs() >= 60_000)
+		{
+			// Time logged in sits after the date, when it fits before the change.
+			String played = Format.duration(day.getPlayedMs());
+			int px = 10 + fm.stringWidth(date) + 6;
+			if (px + small.stringWidth(played) < w - 9 - fm.stringWidth(text) - 6)
+			{
+				g.drawString(played, px, 4 + fm.getAscent());
+			}
+		}
 
 		// Play and market side by side, scaled against the busiest day in the list.
 		int bx = w - 9 - 70;

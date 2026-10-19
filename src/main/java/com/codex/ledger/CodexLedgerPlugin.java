@@ -1,6 +1,8 @@
 package com.codex.ledger;
 
 import com.codex.ledger.core.Day;
+import com.codex.ledger.core.Kind;
+import com.codex.ledger.core.Kinds;
 import com.codex.ledger.core.Ledger;
 import com.codex.ledger.core.Offer;
 import com.codex.ledger.core.Report;
@@ -31,6 +33,7 @@ import net.runelite.api.GameState;
 import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.Item;
+import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.Player;
 import net.runelite.api.coords.LocalPoint;
@@ -57,6 +60,7 @@ import net.runelite.client.events.ClientShutdown;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.events.RuneScapeProfileChanged;
 import net.runelite.client.game.ItemManager;
+import net.runelite.client.game.ItemStats;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
@@ -132,6 +136,8 @@ public class CodexLedgerPlugin extends Plugin
 
 	private final WorthPlaque plaque = new WorthPlaque();
 	private final Map<Integer, String> names = new HashMap<>();
+	/** What each item is, worked out once on the client thread. */
+	private final Map<Integer, Kind> kinds = new HashMap<>();
 
 	private LedgerPanel panel;
 	private NavigationButton navButton;
@@ -249,6 +255,10 @@ public class CodexLedgerPlugin extends Plugin
 			// The client forgets the offers while away; they are read afresh after logging back in.
 			loggedInTicks = -1;
 			synced = false;
+			if (ledger != null)
+			{
+				ledger.pause();
+			}
 			if (state == GameState.LOGIN_SCREEN)
 			{
 				fromLoginScreen = true;
@@ -376,6 +386,10 @@ public class CodexLedgerPlugin extends Plugin
 		if (!pricesReady())
 		{
 			return;
+		}
+		if (ledger.played(System.currentTimeMillis(), ZoneId.systemDefault()))
+		{
+			unsaved = true;
 		}
 		ledger.setAtExchange(atExchange());
 		if (ledger.hasPending() || ticks % REVALUE_TICKS == 0)
@@ -547,6 +561,7 @@ public class CodexLedgerPlugin extends Plugin
 		{
 			ledger = new Ledger();
 		}
+		ledger.setKinds(this::kind);
 		unsaved = false;
 		dirty = true;
 	}
@@ -656,6 +671,23 @@ public class CodexLedgerPlugin extends Plugin
 				target.update(copy, shownNames, name, state, now);
 			});
 		}
+	}
+
+	/** What an item is: coins, gear, supplies or materials. Asked on the client thread while settling. */
+	private Kind kind(int itemId)
+	{
+		Kind known = kinds.get(itemId);
+		if (known != null)
+		{
+			return known;
+		}
+		ItemComposition item = itemManager.getItemComposition(itemId);
+		ItemStats stats = itemManager.getItemStats(itemId);
+		boolean equipable = stats != null && stats.isEquipable() && stats.getEquipment() != null;
+		Kind kind = Kinds.of(itemId, item.getName(), item.getInventoryActions(), equipable,
+			equipable ? stats.getEquipment().getSlot() : -1, item.isStackable());
+		kinds.put(itemId, kind);
+		return kind;
 	}
 
 	private void name(int itemId)

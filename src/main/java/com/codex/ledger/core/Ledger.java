@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.IntFunction;
 import java.util.function.ToIntFunction;
 
 /**
@@ -74,6 +75,10 @@ public final class Ledger
 	private transient boolean tookByDeath;
 	/** Trades seen at the last settle of the exchange. */
 	private transient List<Fill> fills;
+	/** Tells what each item is, so the worth can be split by kind; null leaves days without it. */
+	private transient IntFunction<Kind> kinds;
+	/** When play time was last counted, or 0 after a gap. */
+	private transient long lastPlayed;
 
 	/** Part of an offer that traded between two sightings of its slot. */
 	private static final class Fill
@@ -197,6 +202,39 @@ public final class Ledger
 		lostUntil = now + REGAIN_MS;
 	}
 
+	/** Sets how items are told apart by kind; it is asked once per item held at each settle. */
+	public void setKinds(IntFunction<Kind> kinds)
+	{
+		this.kinds = kinds;
+	}
+
+	/** A gap between two calls longer than this is time away, not play. */
+	static final long PLAY_GAP_MS = 5_000;
+
+	/**
+	 * Counts logged-in time toward today's page. Called every game tick while logged in; the time
+	 * between two calls counts unless it is a gap (a login, a loading screen, a stall).
+	 *
+	 * @return true when the time counted
+	 */
+	public boolean played(long now, ZoneId zone)
+	{
+		long last = lastPlayed;
+		lastPlayed = now;
+		if (!isReady() || last <= 0 || now <= last || now - last > PLAY_GAP_MS)
+		{
+			return false;
+		}
+		today(now, zone).played(now - last);
+		return true;
+	}
+
+	/** Play time stops counting until the next call; for a logout or a hop. */
+	public void pause()
+	{
+		lastPlayed = 0;
+	}
+
 	public boolean hasPending()
 	{
 		return pending != null && !pending.isEmpty() || pendingOffers != null && !pendingOffers.isEmpty();
@@ -260,6 +298,7 @@ public final class Ledger
 		long drift = 0;
 		long foundValue = 0;
 		long worth = 0;
+		long[] byKind = kinds == null ? null : new long[Kind.values().length];
 		for (int id : ids)
 		{
 			long oldQ = before.getOrDefault(id, 0L);
@@ -274,6 +313,11 @@ public final class Ledger
 			long value = (newQ - oldQ) * price;
 			long moved = oldQ * (price - oldPrice);
 			worth += newQ * price;
+			if (byKind != null && newQ > 0)
+			{
+				Kind kind = id == COINS ? Kind.CASH : kinds.apply(id);
+				byKind[(kind == null ? Kind.MATERIALS : kind).ordinal()] += newQ * price;
+			}
 			foundValue += found.getOrDefault(id, 0L) * oldPrice;
 			play += value;
 			drift += moved;
@@ -300,7 +344,7 @@ public final class Ledger
 			history.clear();
 			days.clear();
 			total = worth;
-			today(now, zone);
+			today(now, zone).kinds(byKind);
 			history.add(new Point(now, worth));
 			return true;
 		}
@@ -314,6 +358,10 @@ public final class Ledger
 				day.found(foundValue);
 			}
 			day.totals(play, drift, worth);
+			if (byKind != null)
+			{
+				day.kinds(byKind);
+			}
 			if (changed || history.isEmpty())
 			{
 				record(now, worth);

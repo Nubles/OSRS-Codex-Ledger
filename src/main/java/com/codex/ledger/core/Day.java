@@ -49,6 +49,10 @@ public final class Day
 	private Map<Integer, Deal> deals = new HashMap<>();
 	/** The whole day's trading, which trimming leaves alone. */
 	private Deal trades = new Deal();
+	/** Milliseconds logged in on this day; nothing on pages written before it was kept. */
+	private long ms;
+	/** Worth by kind when the page last settled, by {@link Kind} ordinal; null before kinds were kept. */
+	private long[] kinds;
 
 	public Day()
 	{
@@ -156,6 +160,28 @@ public final class Day
 			default:
 				return dead;
 		}
+	}
+
+	void played(long elapsed)
+	{
+		ms += elapsed;
+	}
+
+	/** Time logged in on this day, or 0 on pages written before it was kept. */
+	public long getPlayedMs()
+	{
+		return ms;
+	}
+
+	void kinds(long[] byKind)
+	{
+		kinds = byKind;
+	}
+
+	/** Worth by kind when the day last settled, or null when it was not told apart. */
+	public long[] getKinds()
+	{
+		return kinds == null || kinds.length != Kind.values().length ? null : kinds.clone();
 	}
 
 	/** Worth found in a place seen for the first time is opening balance, not a gain. */

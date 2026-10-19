@@ -61,6 +61,10 @@ public final class Report
 	private final List<Line> losses;
 	private final List<Line> movers;
 	private final long[] channels;
+	private long playedMs;
+	private long timedPlay;
+	private long[] kindsNow;
+	private long[] kindsBefore;
 
 	private Report(LocalDate from, int days, long start, long end, long play, long market, List<Line> gains, List<Line> losses, List<Line> movers,
 		long[] channels)
@@ -90,12 +94,26 @@ public final class Report
 		LocalDate first = null;
 		Map<Integer, Flow> merged = new HashMap<>();
 		long[] channels = new long[Channel.values().length];
+		long playedMs = 0;
+		long timedPlay = 0;
+		long[] kindsBefore = null;
+		long[] kindsNow = null;
 		for (Day day : ledger.getDays())
 		{
 			LocalDate date = LocalDate.parse(day.getDate());
 			if (from != null && date.isBefore(from))
 			{
+				kindsBefore = day.getKinds() != null ? day.getKinds() : kindsBefore;
 				continue;
+			}
+			if (day.getKinds() != null)
+			{
+				kindsNow = day.getKinds();
+			}
+			if (day.getPlayedMs() > 0)
+			{
+				playedMs += day.getPlayedMs();
+				timedPlay += day.getPlay();
 			}
 			if (first == null)
 			{
@@ -113,7 +131,12 @@ public final class Report
 				merged.computeIfAbsent(e.getKey(), k -> new Flow()).add(e.getValue());
 			}
 		}
-		return build(first != null ? first : today, covered, ledger.getTotal(), play, market, merged, limit, channels);
+		Report report = build(first != null ? first : today, covered, ledger.getTotal(), play, market, merged, limit, channels);
+		report.playedMs = playedMs;
+		report.timedPlay = timedPlay;
+		report.kindsNow = kindsNow;
+		report.kindsBefore = kindsBefore;
+		return report;
 	}
 
 	/** One page of the day book on its own, from the worth it opened on to the worth it closed on. */
@@ -124,7 +147,59 @@ public final class Report
 		{
 			channels[c.ordinal()] = day.channel(c);
 		}
-		return build(LocalDate.parse(day.getDate()), 1, day.getClose(), day.getPlay(), day.getMarket(), day.getItems(), limit, channels);
+		Report report = build(LocalDate.parse(day.getDate()), 1, day.getClose(), day.getPlay(), day.getMarket(), day.getItems(), limit, channels);
+		report.playedMs = day.getPlayedMs();
+		report.timedPlay = day.getPlayedMs() > 0 ? day.getPlay() : 0;
+		report.kindsNow = day.getKinds();
+		return report;
+	}
+
+	/** Below this much logged-in time an hourly figure is mostly noise and is not given. */
+	public static final long MIN_TIMED_MS = 10 * 60_000L;
+
+	/** Time logged in over the pages covered; pages written before it was kept add nothing. */
+	public long getPlayedMs()
+	{
+		return playedMs;
+	}
+
+	/** Whether there is enough logged-in time for an hourly figure. */
+	public boolean hasHourly()
+	{
+		return playedMs >= MIN_TIMED_MS;
+	}
+
+	/**
+	 * Play an hour logged in: the gold made or spent by playing, over the pages that kept their time,
+	 * so a page from before time was kept never dilutes it. Market moves are not play and stay out.
+	 */
+	public long perHour()
+	{
+		return hasHourly() ? Math.round(timedPlay * 3_600_000.0 / playedMs) : 0;
+	}
+
+	/** Worth by kind as the span ends, by {@link Kind} ordinal, or null when kinds were not kept. */
+	public long[] getKinds()
+	{
+		return kindsNow == null ? null : kindsNow.clone();
+	}
+
+	/**
+	 * How each kind's worth changed over the span, by {@link Kind} ordinal: from the last page before the
+	 * span to the end. Null when there is no earlier page with kinds to measure from.
+	 */
+	public long[] kindChange()
+	{
+		if (kindsNow == null || kindsBefore == null)
+		{
+			return null;
+		}
+		long[] change = new long[kindsNow.length];
+		for (int i = 0; i < change.length; i++)
+		{
+			change[i] = kindsNow[i] - kindsBefore[i];
+		}
+		return change;
 	}
 
 	private static Report build(LocalDate from, int covered, long end, long play, long market, Map<Integer, Flow> merged, int limit,
