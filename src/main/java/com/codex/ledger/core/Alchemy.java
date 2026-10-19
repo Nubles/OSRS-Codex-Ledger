@@ -16,6 +16,8 @@ public final class Alchemy
 	public static final int COINS = 995;
 	public static final int PLATINUM = 13204;
 	public static final int NATURE_RUNE = 561;
+	/** The Magic level High Level Alchemy is cast from. */
+	public static final int MAGIC_LEVEL = 55;
 	/** Lines shown at most. */
 	public static final int SHOWN = 8;
 	/** A line must make at least this much over selling to be worth the casts. */
@@ -81,13 +83,19 @@ public final class Alchemy
 	 * @param holdings everything held, by item id
 	 * @param price the Grand Exchange price of one, 0 when it has none
 	 * @param highAlch the high alchemy value of one, 0 when it cannot be alched
+	 * @param natureRune the Grand Exchange price of a nature rune, looked up whether or not any are held;
+	 *     0 when unknown, and then nothing is called better alched rather than count the rune as free
 	 */
-	public static Alchemy of(Map<Integer, Long> holdings, IntToLongFunction price, IntToLongFunction highAlch)
+	public static Alchemy of(Map<Integer, Long> holdings, IntToLongFunction price, IntToLongFunction highAlch, long natureRune)
 	{
-		long rune = Math.max(0, price.applyAsLong(NATURE_RUNE));
 		List<Line> all = new ArrayList<>();
 		long gain = 0;
 		long casts = 0;
+		if (natureRune <= 0)
+		{
+			return new Alchemy(all, 0, 0);
+		}
+		long rune = natureRune;
 		for (Map.Entry<Integer, Long> e : holdings.entrySet())
 		{
 			int id = e.getKey();

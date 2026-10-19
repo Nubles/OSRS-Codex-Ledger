@@ -42,6 +42,7 @@ import net.runelite.api.Item;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.Player;
+import net.runelite.api.Skill;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ActorDeath;
@@ -156,6 +157,8 @@ public class CodexLedgerPlugin extends Plugin
 	private final Map<Integer, String> names = new HashMap<>();
 	/** What each item is, worked out once on the client thread. */
 	private final Map<Integer, Kind> kinds = new HashMap<>();
+	/** The account's real Magic level as last seen logged in, 0 until then. */
+	private int magicLevel;
 	/** High alchemy values by item id; they never change. */
 	private final Map<Integer, Long> highAlch = new HashMap<>();
 
@@ -237,6 +240,7 @@ public class CodexLedgerPlugin extends Plugin
 			ledger = null;
 			profile = null;
 			chronicle = Collections.emptyList();
+			magicLevel = 0;
 			names.clear();
 			synced = false;
 			loggedInTicks = -1;
@@ -588,6 +592,7 @@ public class CodexLedgerPlugin extends Plugin
 		profile = configManager.getRSProfileKey();
 		ledger = null;
 		chronicle = Collections.emptyList();
+		magicLevel = 0;
 		if (profile == null)
 		{
 			return;
@@ -712,9 +717,14 @@ public class CodexLedgerPlugin extends Plugin
 				name(id);
 			}
 		}
-		// Ironmen cannot sell, so "better alched than sold" means nothing to them.
-		Alchemy alchemy = client.getVarbitValue(VarbitID.IRONMAN) > 0 ? null
-			: Alchemy.of(copy.holdings(), copy::price, this::highAlch);
+		if (loggedIn && client.getRealSkillLevel(Skill.MAGIC) > 0)
+		{
+			magicLevel = client.getRealSkillLevel(Skill.MAGIC);
+		}
+		// Ironmen cannot sell, so "better alched than sold" means nothing to them; nor can anyone cast it below 55 Magic.
+		Alchemy alchemy = client.getVarbitValue(VarbitID.IRONMAN) > 0 || magicLevel < Alchemy.MAGIC_LEVEL ? null
+			// The ledger prices only what is held, so the rune's price is asked of the exchange itself.
+			: Alchemy.of(copy.holdings(), copy::price, this::highAlch, itemManager.getItemPrice(Alchemy.NATURE_RUNE));
 		if (alchemy != null)
 		{
 			for (Alchemy.Line line : alchemy.getLines())

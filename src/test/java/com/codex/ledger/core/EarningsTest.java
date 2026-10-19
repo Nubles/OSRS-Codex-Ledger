@@ -57,4 +57,28 @@ public class EarningsTest
 		assertEquals(1, e.getLines().get(0).getSessions());
 		assertTrue(Earnings.of(Arrays.asList(new Earnings.Logged(NOW, HOUR, null, null, "Vorkath")), NOW).isEmpty());
 	}
+
+	@Test
+	public void readsTheJournalSessionChroniclesOwnCodeWrites() throws Exception
+	{
+		// chronicle-journal.json is a byte-for-byte copy of the fixture Session Chronicle's JournalFixtureTest
+		// proves its writer produces: a Vorkath session with this ledger's worth at either end (1,000m to
+		// 1,002.5m over 26 minutes 15 seconds of play), then an hour of Mining Ledger saw no worth for.
+		String json;
+		try (java.io.InputStream in = EarningsTest.class.getResourceAsStream("chronicle-journal.json"))
+		{
+			json = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+		}
+		List<Earnings.Logged> sessions = new Gson().fromJson(json, new TypeToken<List<Earnings.Logged>>()
+		{
+		}.getType());
+		Earnings e = Earnings.of(sessions, 1_790_100_000_000L);
+		assertEquals(1, e.getLines().size());
+		Earnings.Line vork = e.getLines().get(0);
+		assertEquals("Vorkath", vork.getName());
+		assertEquals(1_575_000, vork.getPlayedMs());
+		assertEquals(2_500_000, vork.getChange());
+		assertEquals(5_714_286, vork.perHour());
+		assertEquals(2, e.getDays());
+	}
 }

@@ -37,7 +37,7 @@ public class AlchemyTest
 		alch.put(WHIP, 72_000L);
 		alch.put(UNTRADEABLE, 50_000L);
 		alch.put(TRINKET, 12_000L);
-		Alchemy a = Alchemy.of(held, id -> price.getOrDefault(id, 0L), id -> alch.getOrDefault(id, 0L));
+		Alchemy a = Alchemy.of(held, id -> price.getOrDefault(id, 0L), id -> alch.getOrDefault(id, 0L), 100);
 
 		assertEquals(2, a.getLines().size());
 		// Under 50 coins there is no tax: 100 a cast against 40 sold.
@@ -64,8 +64,24 @@ public class AlchemyTest
 	{
 		Map<Integer, Long> held = new HashMap<>();
 		held.put(WHIP, 1L);
-		Alchemy a = Alchemy.of(held, id -> 1_300_000L, id -> 72_000L);
+		Alchemy a = Alchemy.of(held, id -> 1_300_000L, id -> 72_000L, 100);
 		assertTrue(a.isEmpty());
 		assertEquals(0, a.getGain());
+	}
+
+	@Test
+	public void withoutANatureRunePriceNothingIsCalledBetterAlched()
+	{
+		// The ledger keeps prices only for what is held: an account with no nature runes has none for
+		// them, and alching looked a nature rune cheaper than it is (free), so 1,000 platebodies that
+		// alch for 38,050 against 37,240 sold were called better alched though each cast loses 50.
+		Map<Integer, Long> held = new HashMap<>();
+		held.put(PLATEBODY, 1_000L);
+		Alchemy blind = Alchemy.of(held, id -> id == PLATEBODY ? 38_000L : 0L, id -> 37_290L, 0);
+		assertTrue(blind.isEmpty());
+		Alchemy priced = Alchemy.of(held, id -> id == PLATEBODY ? 38_000L : 0L, id -> 37_290L, 100);
+		assertTrue("37,190 a cast against 37,240 sold", priced.isEmpty());
+		Alchemy cheaper = Alchemy.of(held, id -> id == PLATEBODY ? 38_000L : 0L, id -> 39_000L, 100);
+		assertEquals(1_660_000, cheaper.getGain());
 	}
 }
