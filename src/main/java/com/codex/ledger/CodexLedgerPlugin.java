@@ -378,7 +378,10 @@ public class CodexLedgerPlugin extends Plugin
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event)
 	{
-		if (client.getGameState() != GameState.LOGGED_IN || ledger == null)
+		GameState state = client.getGameState();
+		// A teleport's loading screen can carry the tab it used; after a hop nothing settles until the
+		// containers are read whole again, so a change seen while loading is safe to keep.
+		if (state != GameState.LOGGED_IN && state != GameState.LOADING || ledger == null)
 		{
 			return;
 		}
