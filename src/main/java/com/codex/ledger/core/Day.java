@@ -16,6 +16,8 @@ public final class Day
 	static final int KEPT_ITEMS = 16;
 	/** Items a page may hold while its day is still being written. */
 	static final int OPEN_ITEMS = 600;
+	/** Items traded on the exchange kept on a page once its day is over; the day's trade totals stay whole. */
+	static final int KEPT_DEALS = 24;
 
 	private String date;
 	private long open;
@@ -25,6 +27,26 @@ public final class Day
 	private long play;
 	private long market;
 	private Map<Integer, Flow> items = new HashMap<>();
+
+	// Where the day's play came from. Together they make up the play figure; pages written before
+	// they were kept read them as nothing. See Channel.
+	/** Bought and sold on the exchange: what was paid or received against the market price, after tax. */
+	private long ex;
+	/** Items that came in from anywhere else: loot, gathering, shops, rewards. */
+	private long loot;
+	/** Items that went out other than by a sale: eaten, used up, alched, dropped. */
+	private long used;
+	/** Coins that came in from anywhere but the exchange: alchemy, shops, rewards. */
+	private long cin;
+	/** Coins that went out to anything but the exchange: shops, fees, upkeep. */
+	private long cout;
+	/** Lost on death, less what was got back from the gravestone or Death. */
+	private long dead;
+
+	/** The day's trades on the exchange, by item; trimmed to the biggest once the day is over. */
+	private Map<Integer, Deal> deals = new HashMap<>();
+	/** The whole day's trading, which trimming leaves alone. */
+	private Deal trades = new Deal();
 
 	public Day()
 	{
@@ -39,13 +61,15 @@ public final class Day
 		this.low = open;
 	}
 
-	void flow(int itemId, long quantity, long value, long drift)
+	void flow(int itemId, long quantity, long value, long drift, long tradedQuantity, long tradedValue)
 	{
-		if (value == 0 && drift == 0)
+		if (value == 0 && drift == 0 && tradedValue == 0)
 		{
 			return;
 		}
-		items.computeIfAbsent(itemId, k -> new Flow()).add(quantity, value, drift);
+		Flow flow = items.computeIfAbsent(itemId, k -> new Flow());
+		flow.add(quantity, value, drift);
+		flow.traded(tradedQuantity, tradedValue);
 		if (items.size() > OPEN_ITEMS)
 		{
 			trim(OPEN_ITEMS / 2);
@@ -59,6 +83,77 @@ public final class Day
 		this.close = close;
 		high = Math.max(high, close);
 		low = Math.min(low, close);
+	}
+
+	/** Books part of the day's play to where it came from. */
+	void channel(Channel channel, long value)
+	{
+		switch (channel)
+		{
+			case EXCHANGE:
+				ex += value;
+				break;
+			case LOOT:
+				loot += value;
+				break;
+			case USED:
+				used += value;
+				break;
+			case COINS_IN:
+				cin += value;
+				break;
+			case COINS_OUT:
+				cout += value;
+				break;
+			default:
+				dead += value;
+				break;
+		}
+	}
+
+	/** The day's deal in an item, opened if this is its first trade of the day. */
+	Deal deal(int itemId)
+	{
+		if (deals == null)
+		{
+			deals = new HashMap<>();
+		}
+		return deals.computeIfAbsent(itemId, k -> new Deal());
+	}
+
+	/** What the day's trading came to, every item together. */
+	public Deal getTrades()
+	{
+		if (trades == null)
+		{
+			trades = new Deal();
+		}
+		return trades;
+	}
+
+	public Map<Integer, Deal> getDeals()
+	{
+		return deals == null ? new HashMap<>() : deals;
+	}
+
+	/** Part of the day's play by where it came from. */
+	public long channel(Channel channel)
+	{
+		switch (channel)
+		{
+			case EXCHANGE:
+				return ex;
+			case LOOT:
+				return loot;
+			case USED:
+				return used;
+			case COINS_IN:
+				return cin;
+			case COINS_OUT:
+				return cout;
+			default:
+				return dead;
+		}
 	}
 
 	/** Worth found in a place seen for the first time is opening balance, not a gain. */
@@ -84,6 +179,23 @@ public final class Day
 			kept.put(list.get(i).getKey(), list.get(i).getValue());
 		}
 		items = kept;
+	}
+
+	/** Keeps only the items traded the most. The day's trade totals are kept whole. */
+	void trimDeals(int keep)
+	{
+		if (deals == null || deals.size() <= keep)
+		{
+			return;
+		}
+		List<Map.Entry<Integer, Deal>> list = new ArrayList<>(deals.entrySet());
+		list.sort(Comparator.comparingLong((Map.Entry<Integer, Deal> e) -> e.getValue().weight()).reversed());
+		Map<Integer, Deal> kept = new HashMap<>();
+		for (int i = 0; i < keep; i++)
+		{
+			kept.put(list.get(i).getKey(), list.get(i).getValue());
+		}
+		deals = kept;
 	}
 
 	public String getDate()

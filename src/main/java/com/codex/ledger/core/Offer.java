@@ -147,6 +147,18 @@ public final class Offer
 		return take;
 	}
 
+	/** Coins paid so far for a buy, or received before tax for a sale. */
+	public long getSpent()
+	{
+		return spent;
+	}
+
+	/** The tax kept so far from a sale; nothing for a buy. */
+	long tax()
+	{
+		return buy ? 0 : tax(item, done, spent);
+	}
+
 	public int getItem()
 	{
 		return item;

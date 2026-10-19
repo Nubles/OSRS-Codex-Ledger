@@ -32,6 +32,7 @@ import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.Player;
+import net.runelite.api.events.ActorDeath;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.GrandExchangeOfferChanged;
@@ -271,9 +272,14 @@ public class CodexLedgerPlugin extends Plugin
 	@Subscribe
 	public void onConfigChanged(ConfigChanged event)
 	{
-		if (CodexLedgerConfig.GROUP.equals(event.getGroup()))
+		// The ledger itself is saved in this group too, every few minutes; only the settings matter here.
+		if (CodexLedgerConfig.GROUP.equals(event.getGroup()) && event.getProfile() == null)
 		{
 			plaque.setEnabled(config.showPlaque());
+			if ("goal".equals(event.getKey()) || "goalName".equals(event.getKey()))
+			{
+				clientThread.invokeLater(this::publish);
+			}
 		}
 	}
 
@@ -301,6 +307,16 @@ public class CodexLedgerPlugin extends Plugin
 			return;
 		}
 		ledger.offer(slot, offer(event.getOffer()));
+	}
+
+	@Subscribe
+	public void onActorDeath(ActorDeath event)
+	{
+		// What the death takes leaves the account a few ticks later, when the player is sent home.
+		if (ledger != null && event.getActor() == client.getLocalPlayer())
+		{
+			ledger.died(System.currentTimeMillis());
+		}
 	}
 
 	@Subscribe
@@ -580,9 +596,17 @@ public class CodexLedgerPlugin extends Plugin
 		{
 			name(offer.getItem());
 		}
+		for (int id : copy.getBook().keySet())
+		{
+			name(id);
+		}
 		for (Day day : copy.getDays())
 		{
 			for (int id : day.getItems().keySet())
+			{
+				name(id);
+			}
+			for (int id : day.getDeals().keySet())
 			{
 				name(id);
 			}
@@ -602,7 +626,12 @@ public class CodexLedgerPlugin extends Plugin
 		}
 		if (target != null)
 		{
-			SwingUtilities.invokeLater(() -> target.update(copy, shownNames, name, state, now));
+			LedgerPanel.Goal goal = new LedgerPanel.Goal(Math.max(0, config.goal()) * 1_000_000L, config.goalName());
+			SwingUtilities.invokeLater(() ->
+			{
+				target.setGoal(goal);
+				target.update(copy, shownNames, name, state, now);
+			});
 		}
 	}
 

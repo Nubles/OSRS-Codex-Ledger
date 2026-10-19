@@ -12,6 +12,10 @@ public final class Flow
 	private long v;
 	/** Value gained or lost by the price moving on what was already held. */
 	private long d;
+	/** The part of the quantity that was bought or sold on the Grand Exchange. */
+	private long tq;
+	/** What that part came to at the price of the moment. */
+	private long tv;
 
 	public Flow()
 	{
@@ -31,9 +35,16 @@ public final class Flow
 		d += drift;
 	}
 
+	void traded(long quantity, long value)
+	{
+		tq += quantity;
+		tv += value;
+	}
+
 	void add(Flow other)
 	{
 		add(other.q, other.v, other.d);
+		traded(other.tq, other.tv);
 	}
 
 	public long getQuantity()
@@ -49,6 +60,18 @@ public final class Flow
 	public long getDrift()
 	{
 		return d;
+	}
+
+	/** The quantity gained or lost other than by trading on the Grand Exchange. */
+	public long getOwnQuantity()
+	{
+		return q - tq;
+	}
+
+	/** The value gained or lost other than by trading on the Grand Exchange. */
+	public long getOwnValue()
+	{
+		return v - tv;
 	}
 
 	/** How much this item mattered either way, for ranking and trimming. */

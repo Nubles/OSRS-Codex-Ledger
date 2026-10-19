@@ -3,6 +3,7 @@ package com.codex.ledger;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
+import net.runelite.client.config.Range;
 
 @ConfigGroup(CodexLedgerConfig.GROUP)
 public interface CodexLedgerConfig extends Config
@@ -29,5 +30,28 @@ public interface CodexLedgerConfig extends Config
 	default boolean showPlaque()
 	{
 		return false;
+	}
+
+	@ConfigItem(
+		keyName = "goal",
+		name = "Worth goal (millions)",
+		description = "A worth to aim for, in millions of coins: 1500 is 1.5B. The Worth page shows how far along you are and when you get there at your pace. 0 aims at the next round figure",
+		position = 2
+	)
+	@Range(min = 0, max = 2_000_000)
+	default int goal()
+	{
+		return 0;
+	}
+
+	@ConfigItem(
+		keyName = "goalName",
+		name = "Goal name",
+		description = "What the goal is for, such as Twisted bow, shown above it on the Worth page",
+		position = 3
+	)
+	default String goalName()
+	{
+		return "";
 	}
 }

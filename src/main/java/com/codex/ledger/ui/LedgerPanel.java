@@ -1,10 +1,14 @@
 package com.codex.ledger.ui;
 
+import com.codex.ledger.core.Channel;
 import com.codex.ledger.core.Day;
+import com.codex.ledger.core.Deal;
+import com.codex.ledger.core.Forecast;
 import com.codex.ledger.core.Ledger;
 import com.codex.ledger.core.Offer;
 import com.codex.ledger.core.Report;
 import com.codex.ledger.core.Store;
+import com.codex.ledger.core.Trades;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
@@ -28,14 +32,18 @@ import javax.swing.border.EmptyBorder;
 import net.runelite.client.ui.PluginPanel;
 
 /**
- * The Ledger side panel: the crest, then three pages. Worth is the line of the account's worth
- * over time and where it is kept, Day book is where the gold came from and went, and Hoard is
- * everything held, most valuable first.
+ * The Ledger side panel: the crest, then four pages. Worth is the line of the account's worth
+ * over time, where it is kept and where it is heading; Day book is where the gold came from and
+ * went; Trades is what trading on the Grand Exchange made after tax; and Hoard is everything held,
+ * most valuable first.
  */
 public class LedgerPanel extends PluginPanel
 {
 	static final int WIDTH = 200;
-	private static final String[] TABS = {"worth", "daybook", "hoard"};
+	private static final String[] TABS = {"worth", "daybook", "trades", "hoard"};
+	private static final int WORTH = 0;
+	private static final int DAYBOOK = 1;
+	private static final int TRADES = 2;
 	private static final String[] RANGES = {"Day", "Week", "Month", "Year", "All"};
 	private static final long[] RANGE_MS = {86_400_000L, 7 * 86_400_000L, 30 * 86_400_000L, 365 * 86_400_000L, 0};
 	private static final int[] RANGE_DAYS = {1, 7, 30, 365, 0};
@@ -45,6 +53,21 @@ public class LedgerPanel extends PluginPanel
 	private static final int LINES = 6;
 	private static final int PAGES = 14;
 	private static final int HOARD = 40;
+	private static final int TRADED = 12;
+	private static final int HELD = 8;
+
+	/** The worth the player aims at, from the settings. */
+	public static final class Goal
+	{
+		final long amount;
+		final String name;
+
+		public Goal(long amount, String name)
+		{
+			this.amount = amount;
+			this.name = name == null ? "" : name.trim();
+		}
+	}
 
 	/** What the panel has to show. */
 	public enum State
@@ -56,14 +79,17 @@ public class LedgerPanel extends PluginPanel
 
 	private final ItemIcons icons;
 	private final Crest crest = new Crest();
-	private final Segmented tabs = new Segmented(true, "Worth", "Day book", "Hoard");
+	private final Segmented tabs = new Segmented(true, "Worth", "Days", "Trades", "Hoard");
 	private final Segmented range = new Segmented(false, RANGES);
 	private final Segmented span = new Segmented(false, SPANS);
+	private final Segmented tradeSpan = new Segmented(false, SPANS);
 	private final CardLayout cards = new CardLayout();
 	private final JPanel content = new JPanel(cards);
 	private final JScrollPane worth = scroller();
 	private final JScrollPane daybook = scroller();
+	private final JScrollPane trades = scroller();
 	private final JScrollPane hoard = scroller();
+	private Goal goal = new Goal(0, "");
 
 	private Ledger ledger;
 	private Map<Integer, String> names = Collections.emptyMap();
@@ -74,7 +100,7 @@ public class LedgerPanel extends PluginPanel
 	private int pagesShown = PAGES;
 	private final int[] chartPointer = {-1};
 	/** Tabs whose content is out of date; a hidden tab is only rebuilt when it is next shown. */
-	private final boolean[] stale = {true, true, true};
+	private final boolean[] stale = {true, true, true, true};
 
 	public LedgerPanel(ItemIcons icons)
 	{
@@ -96,7 +122,8 @@ public class LedgerPanel extends PluginPanel
 		content.setOpaque(false);
 		content.add(worth, TABS[0]);
 		content.add(daybook, TABS[1]);
-		content.add(hoard, TABS[2]);
+		content.add(trades, TABS[2]);
+		content.add(hoard, TABS[3]);
 		add(content, BorderLayout.CENTER);
 
 		tabs.onChange(this::showTab);
@@ -112,6 +139,8 @@ public class LedgerPanel extends PluginPanel
 			pagesShown = PAGES;
 			rebuildDaybook();
 		});
+		tradeSpan.setSelected(1, false);
+		tradeSpan.onChange(i -> rebuildTrades());
 		rebuild();
 	}
 
@@ -151,6 +180,12 @@ public class LedgerPanel extends PluginPanel
 		}
 	}
 
+	/** The worth goal from the settings; shown at the next rebuild. */
+	public void setGoal(Goal goal)
+	{
+		this.goal = goal;
+	}
+
 	@Override
 	public void onActivate()
 	{
@@ -177,6 +212,13 @@ public class LedgerPanel extends PluginPanel
 	{
 		range.setSelected(index, false);
 		rebuildWorth();
+	}
+
+	/** Picks the trades page's span, for previews and tests. */
+	public void showTradeSpan(int index)
+	{
+		tradeSpan.setSelected(index, false);
+		rebuildTrades();
 	}
 
 	/** Opens one day book page by date, or the chosen span when null. */
@@ -223,13 +265,17 @@ public class LedgerPanel extends PluginPanel
 	private void rebuild(int tab)
 	{
 		stale[tab] = false;
-		if (tab == 0)
+		if (tab == WORTH)
 		{
 			rebuildWorth();
 		}
-		else if (tab == 1)
+		else if (tab == DAYBOOK)
 		{
 			rebuildDaybook();
+		}
+		else if (tab == TRADES)
+		{
+			rebuildTrades();
 		}
 		else
 		{
@@ -308,6 +354,7 @@ public class LedgerPanel extends PluginPanel
 			tiles.add(new StatTile(Format.coins(today.getHigh()), "High", "today", Theme.GOLD_BRIGHT));
 			tiles.add(new StatTile(Format.coins(today.getLow()), "Low", "today", Theme.GOLD));
 			stack.add(tiles);
+			goal(stack);
 			whereKept(stack);
 			replace(worth, stack);
 			return;
@@ -317,8 +364,52 @@ public class LedgerPanel extends PluginPanel
 		tiles.add(new StatTile(worst == null ? "-" : Format.signed(worst.change()), "Worst day",
 			worst == null ? "" : Format.day(LocalDate.parse(worst.getDate())), worst == null ? Theme.TEXT_MUTED : Theme.signed(worst.change())));
 		stack.add(tiles);
+		goal(stack);
 		whereKept(stack);
 		replace(worth, stack);
+	}
+
+	/** The worth goal, or the next round figure, with how far along it is and when it falls at this pace. */
+	private void goal(StackPanel stack)
+	{
+		Forecast f = Forecast.of(ledger, today(), goal.amount);
+		String name = f.isGoalSet() ? (goal.name.isEmpty() ? "Your goal" : goal.name) : "Next mark";
+		stack.add(new SectionHeader(f.isGoalSet() ? "Goal" : "Heading for", Format.coins(f.getTarget())));
+		Card card = new Card(new BorderLayout(0, 5));
+		card.accent(f.isReached() ? Theme.GREEN : Theme.GOLD);
+		JPanel top = new JPanel(new BorderLayout(6, 0));
+		top.setOpaque(false);
+		top.add(Ui.label(name, Theme.body(), Theme.GOLD_BRIGHT), BorderLayout.CENTER);
+		top.add(Ui.label(Format.percent(f.progress()), Theme.body(), f.isReached() ? Theme.GREEN : Theme.GOLD), BorderLayout.EAST);
+		card.add(top, BorderLayout.NORTH);
+		card.add(new GoalBar(f.progress()), BorderLayout.CENTER);
+		card.add(Ui.wrapped(forecastText(f), Theme.small(), Theme.TEXT_MUTED, WIDTH - 30), BorderLayout.SOUTH);
+		card.setToolTipText("The pace is your worth's change over the last " + Forecast.WINDOW
+			+ " days, spread over every day, days off included. Set a goal in the plugin's settings.");
+		stack.add(card);
+	}
+
+	static String forecastText(Forecast f)
+	{
+		if (f.isReached())
+		{
+			return "Reached. Set a new goal in the settings to keep going.";
+		}
+		String left = Format.coins(f.remaining()) + " to go. ";
+		if (!f.hasPace())
+		{
+			return left + "A pace appears after " + Forecast.WINDOW / 10 + " days of pages.";
+		}
+		String pace = Format.signed(Math.round(f.getPerDay())) + " a day over " + f.getDays() + " days";
+		if (f.getPerDay() <= 0)
+		{
+			return left + "At " + pace + " it is not getting closer.";
+		}
+		if (f.getEta() == null)
+		{
+			return left + "At " + pace + " it is more than ten years off.";
+		}
+		return left + "At " + pace + ", around " + Format.longDay(f.getEta()) + ".";
 	}
 
 	private void whereKept(StackPanel stack)
@@ -478,11 +569,18 @@ public class LedgerPanel extends PluginPanel
 		head.add(top, BorderLayout.NORTH);
 		head.add(new SplitRows(report.getPlay(), report.getMarket()), BorderLayout.CENTER);
 		stack.add(head);
+		whereItWent(stack, report);
 
 		lines(stack, "Came in", report.getGains(), false);
 		lines(stack, "Went out", report.getLosses(), false);
+		Deal traded = report.getDays() == 1 && page != null ? page.getTrades() : null;
+		if (traded != null && traded.volume() > 0)
+		{
+			stack.add(Ui.wrapped("Trading that day: " + Format.coins(traded.getBuyCoins()) + " bought, " + Format.coins(traded.getSaleCoins())
+				+ " sold, " + Format.signed(traded.getProfit()) + " profit. The Trades page has every item.", Theme.small(), Theme.TEXT_FAINT, WIDTH - 10));
+		}
 		lines(stack, "Price moves", report.getMovers(), true);
-		if (report.getGains().isEmpty() && report.getLosses().isEmpty() && report.getMovers().isEmpty())
+		if (report.getGains().isEmpty() && report.getLosses().isEmpty() && report.getMovers().isEmpty() && report.channel(Channel.EXCHANGE) == 0)
 		{
 			stack.add(note("A quiet page", "Nothing came in or went out yet. Loot, supplies used, trades and price moves all land here as they happen."));
 		}
@@ -518,6 +616,41 @@ public class LedgerPanel extends PluginPanel
 			}
 		}
 		replace(daybook, stack);
+	}
+
+	/** The play taken apart by how it happened: trading, loot, supplies, coins and deaths. */
+	private void whereItWent(StackPanel stack, Report report)
+	{
+		List<ChannelRows.Row> rows = new ArrayList<>();
+		for (Channel c : Channel.values())
+		{
+			long value = report.channel(c);
+			if (value != 0)
+			{
+				rows.add(new ChannelRows.Row(c.getLabel(), value, Theme.GAIN, Theme.LOSS));
+			}
+		}
+		long older = report.unexplained();
+		if (older != 0 && !rows.isEmpty())
+		{
+			// Pages written before the channels were kept.
+			rows.add(new ChannelRows.Row("Earlier pages", older, Theme.GOLD_DIM, Theme.GOLD_DIM));
+		}
+		if (rows.isEmpty())
+		{
+			return;
+		}
+		if (report.getMarket() != 0)
+		{
+			rows.add(new ChannelRows.Row("Market", report.getMarket(), Theme.MARKET, Theme.EMBER));
+		}
+		stack.add(new SectionHeader("Where it went", Format.signed(report.change())));
+		Card card = new Card(new BorderLayout());
+		card.setBorder(new EmptyBorder(6, 10, 6, 10));
+		card.add(new ChannelRows(rows, "Exchange is buying and selling against the market price, after tax. Loot is every item that came in "
+			+ "some other way, Supplies every item that went out other than by a sale. Deaths is what dying took, less what you got back."),
+			BorderLayout.CENTER);
+		stack.add(card);
 	}
 
 	private void lines(StackPanel stack, String heading, List<Report.Line> lines, boolean drift)
@@ -560,6 +693,149 @@ public class LedgerPanel extends PluginPanel
 	{
 		String name = names.get(itemId);
 		return name != null ? name : "Item " + itemId;
+	}
+
+	// The Trades tab.
+
+	private void rebuildTrades()
+	{
+		StackPanel stack = new StackPanel(8, 8);
+		stack.add(tradeSpan);
+		if (waiting(stack))
+		{
+			replace(trades, stack);
+			return;
+		}
+		int s = tradeSpan.getSelected();
+		Trades t = Trades.of(ledger, SPAN_DAYS[s], today());
+		Deal total = t.getTotal();
+		if (total.volume() == 0 && t.getOpen().isEmpty())
+		{
+			stack.add(note("No trades yet", "Buy and sell on the Grand Exchange and every trade lands here: what each item made after the 2% tax, "
+				+ "and what you still hold from your buys with what it would fetch now."));
+			replace(trades, stack);
+			return;
+		}
+
+		Card head = new Card(new BorderLayout(0, 6));
+		head.highlighted(true);
+		JPanel top = new JPanel(new BorderLayout());
+		top.setOpaque(false);
+		JPanel words = new JPanel();
+		words.setOpaque(false);
+		words.setLayout(new BoxLayout(words, BoxLayout.Y_AXIS));
+		String title = s == 0 ? "Today" : s == 3 ? "All trading" : "The last " + SPANS[s];
+		words.add(Ui.label(title, Theme.title(), Theme.GOLD_BRIGHT));
+		words.add(Ui.label("profit after " + Format.coins(total.getTax()) + " tax", Theme.small(), Theme.TEXT_MUTED));
+		top.add(words, BorderLayout.CENTER);
+		top.add(Ui.label(Format.signed(total.getProfit()), Theme.title(), Theme.signed(total.getProfit())), BorderLayout.EAST);
+		head.add(top, BorderLayout.NORTH);
+		JPanel tiles = new JPanel(new GridLayout(2, 2, 6, 6));
+		tiles.setOpaque(false);
+		tiles.add(new StatTile(Format.coins(total.getBuyCoins()), "Bought", Format.plural(total.getBought(), "item"), Theme.TEAL));
+		tiles.add(new StatTile(Format.coins(total.getSaleCoins()), "Sold", Format.plural(total.getSold(), "item"), Theme.GOLD));
+		tiles.add(new StatTile(Format.coins(total.getTax()), "Tax paid", "2% of sales", Theme.EMBER));
+		double roi = total.roi();
+		tiles.add(new StatTile(roi == 0 ? "-" : Format.signedPercent(roi), "Return", "on cost", roi >= 0 ? Theme.GREEN : Theme.LOSS));
+		head.add(tiles, BorderLayout.CENTER);
+		stack.add(head);
+
+		List<Trades.Item> items = t.getItems();
+		if (!items.isEmpty())
+		{
+			stack.add(new SectionHeader("By item", items.size() + (items.size() == 1 ? " item" : " items")));
+			JPanel list = new JPanel(new GridLayout(0, 1, 0, 2));
+			list.setOpaque(false);
+			for (int i = 0; i < items.size() && i < TRADED; i++)
+			{
+				Trades.Item it = items.get(i);
+				Deal d = it.getDeal();
+				String name = name(it.getItemId());
+				// Only bought so far: what was spent. Only sold, never bought here: what it fetched, with no profit to tell.
+				boolean matched = d.getSold() > d.getUnmatched();
+				String amount = matched ? Format.signed(d.getProfit()) : d.getSold() > 0 ? Format.coins(d.getSaleCoins()) : Format.coins(d.getBuyCoins());
+				Color color = matched ? Theme.signed(d.getProfit()) : d.getSold() > 0 ? Theme.TEXT_MUTED : Theme.TEAL;
+				list.add(new ItemRow(it.getItemId(), name, tradeNote(d), amount, color, -1, icons, tradeTip(name, d)));
+			}
+			stack.add(list);
+			if (items.size() > TRADED)
+			{
+				stack.add(Ui.label("and " + (items.size() - TRADED) + " more", Theme.small(), Theme.TEXT_FAINT));
+			}
+		}
+
+		List<Trades.Open> open = t.getOpen();
+		if (!open.isEmpty())
+		{
+			stack.add(new SectionHeader("Still held", "if sold " + Format.signed(t.openGain())));
+			JPanel list = new JPanel(new GridLayout(0, 1, 0, 2));
+			list.setOpaque(false);
+			for (int i = 0; i < open.size() && i < HELD; i++)
+			{
+				Trades.Open o = open.get(i);
+				String name = name(o.getItemId());
+				long each = Math.round(o.getCost() / (double) o.getQuantity());
+				long now = Math.round(o.getWorth() / (double) o.getQuantity());
+				list.add(new ItemRow(o.getItemId(), name, String.format("%,d", o.getQuantity()) + " at " + Format.coins(each) + ", now " + Format.coins(now),
+					Format.signed(o.gain()), Theme.signed(o.gain()), -1, icons,
+					name + ": " + String.format("%,d", o.getQuantity()) + " bought for " + Format.coins(o.getCost()) + " would sell for "
+						+ Format.coins(o.getWorth()) + " after tax at today's price."));
+			}
+			stack.add(list);
+		}
+
+		if (total.getUnmatched() > 0)
+		{
+			stack.add(Ui.wrapped("Sold " + String.format("%,d", total.getUnmatched()) + (total.getUnmatched() == 1 ? " item" : " items")
+				+ " for " + Format.coins(total.getUnmatchedCoins()) + " that were not bought while the ledger watched (loot, or bought before),"
+				+ " so no profit or loss is counted on them.", Theme.small(), Theme.TEXT_FAINT, WIDTH - 10));
+		}
+		stack.add(Ui.wrapped("Each sale is matched to the average cost of what you bought. Tax is 2% of the price, at most 5M an item; "
+			+ "none under 50 coins or on bonds." + (s == 3 ? "" : " Pages older than today keep their biggest items only."),
+			Theme.small(), Theme.TEXT_FAINT, WIDTH - 10));
+		replace(trades, stack);
+	}
+
+	/** "Bought 1,000 · sold 1,000 · +26%", or what is known when only one side traded. */
+	static String tradeNote(Deal d)
+	{
+		String bought = d.getBought() > 0 ? "Bought " + String.format("%,d", d.getBought()) : null;
+		String sold = d.getSold() > 0 ? "sold " + String.format("%,d", d.getSold()) : null;
+		if (bought == null && sold == null)
+		{
+			return "";
+		}
+		if (sold == null)
+		{
+			return bought + " at " + Format.coins(Math.round(d.getBuyCoins() / (double) d.getBought()));
+		}
+		if (bought == null && d.getUnmatched() >= d.getSold())
+		{
+			return "Sold " + String.format("%,d", d.getSold()) + ", not bought here";
+		}
+		String text = bought == null ? "Sold " + String.format("%,d", d.getSold())
+			: d.getBought() == d.getSold() ? "Flipped " + String.format("%,d", d.getSold()) : bought + ", " + sold;
+		double roi = d.roi();
+		return roi == 0 ? text : text + ", " + Format.signedPercent(roi);
+	}
+
+	private static String tradeTip(String name, Deal d)
+	{
+		StringBuilder tip = new StringBuilder(name).append(": ");
+		if (d.getBought() > 0)
+		{
+			tip.append("bought ").append(String.format("%,d", d.getBought())).append(" for ").append(Format.coins(d.getBuyCoins())).append(". ");
+		}
+		if (d.getSold() > 0)
+		{
+			tip.append("Sold ").append(String.format("%,d", d.getSold())).append(" for ").append(Format.coins(d.getSaleCoins()))
+				.append(" after ").append(Format.coins(d.getTax())).append(" tax, ").append(Format.signed(d.getProfit())).append(" profit.");
+		}
+		if (d.getUnmatched() > 0)
+		{
+			tip.append(' ').append(String.format("%,d", d.getUnmatched())).append(" of them were never bought here.");
+		}
+		return tip.toString().trim();
 	}
 
 	// The Hoard tab.

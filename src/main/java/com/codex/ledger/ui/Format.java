@@ -12,6 +12,7 @@ public final class Format
 	private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("EEE d MMM", Locale.ENGLISH);
 	private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", Locale.ENGLISH);
 	private static final DateTimeFormatter SHORT = DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH);
+	private static final DateTimeFormatter LONG_DAY = DateTimeFormatter.ofPattern("EEE d MMM yyyy", Locale.ENGLISH);
 	private static final DateTimeFormatter MONTH = DateTimeFormatter.ofPattern("MMM yy", Locale.ENGLISH);
 
 	private Format()
@@ -98,6 +99,26 @@ public final class Format
 			return "<1%";
 		}
 		return Math.round(share * 100) + "%";
+	}
+
+	/** A return as a signed percent: "+26%", "-3.4%", "+0.8%". */
+	public static String signedPercent(double share)
+	{
+		double pct = share * 100;
+		String text = Math.abs(pct) < 10 ? trim(Math.abs(pct), 1) : String.valueOf(Math.round(Math.abs(pct)));
+		return (pct < 0 ? "-" : "+") + text + "%";
+	}
+
+	/** "1 item", "1,240 items". */
+	public static String plural(long n, String word)
+	{
+		return String.format(Locale.ENGLISH, "%,d", n) + " " + word + (n == 1 ? "" : "s");
+	}
+
+	/** "Sat 14 Feb 2027", for a day further off than the panel's own dates. */
+	public static String longDay(java.time.LocalDate date)
+	{
+		return LONG_DAY.format(date);
 	}
 
 	/** "just now", "12m ago", "3h ago", "2d ago". */

@@ -60,9 +60,12 @@ public final class Report
 	private final List<Line> gains;
 	private final List<Line> losses;
 	private final List<Line> movers;
+	private final long[] channels;
 
-	private Report(LocalDate from, int days, long start, long end, long play, long market, List<Line> gains, List<Line> losses, List<Line> movers)
+	private Report(LocalDate from, int days, long start, long end, long play, long market, List<Line> gains, List<Line> losses, List<Line> movers,
+		long[] channels)
 	{
+		this.channels = channels;
 		this.from = from;
 		this.days = days;
 		this.start = start;
@@ -86,6 +89,7 @@ public final class Report
 		int covered = 0;
 		LocalDate first = null;
 		Map<Integer, Flow> merged = new HashMap<>();
+		long[] channels = new long[Channel.values().length];
 		for (Day day : ledger.getDays())
 		{
 			LocalDate date = LocalDate.parse(day.getDate());
@@ -100,34 +104,45 @@ public final class Report
 			covered++;
 			play += day.getPlay();
 			market += day.getMarket();
+			for (Channel c : Channel.values())
+			{
+				channels[c.ordinal()] += day.channel(c);
+			}
 			for (Map.Entry<Integer, Flow> e : day.getItems().entrySet())
 			{
 				merged.computeIfAbsent(e.getKey(), k -> new Flow()).add(e.getValue());
 			}
 		}
-		return build(first != null ? first : today, covered, ledger.getTotal(), play, market, merged, limit);
+		return build(first != null ? first : today, covered, ledger.getTotal(), play, market, merged, limit, channels);
 	}
 
 	/** One page of the day book on its own, from the worth it opened on to the worth it closed on. */
 	public static Report page(Day day, int limit)
 	{
-		return build(LocalDate.parse(day.getDate()), 1, day.getClose(), day.getPlay(), day.getMarket(), day.getItems(), limit);
+		long[] channels = new long[Channel.values().length];
+		for (Channel c : Channel.values())
+		{
+			channels[c.ordinal()] = day.channel(c);
+		}
+		return build(LocalDate.parse(day.getDate()), 1, day.getClose(), day.getPlay(), day.getMarket(), day.getItems(), limit, channels);
 	}
 
-	private static Report build(LocalDate from, int covered, long end, long play, long market, Map<Integer, Flow> merged, int limit)
+	private static Report build(LocalDate from, int covered, long end, long play, long market, Map<Integer, Flow> merged, int limit,
+		long[] channels)
 	{
 		List<Line> gains = new ArrayList<>();
 		List<Line> losses = new ArrayList<>();
 		List<Line> movers = new ArrayList<>();
 		for (Map.Entry<Integer, Flow> e : merged.entrySet())
 		{
+			// What was bought and sold on the exchange is told on its own; these lists are the rest.
 			Flow f = e.getValue();
-			Line line = new Line(e.getKey(), f.getQuantity(), f.getValue(), f.getDrift());
-			if (f.getValue() > 0)
+			Line line = new Line(e.getKey(), f.getOwnQuantity(), f.getOwnValue(), f.getDrift());
+			if (f.getOwnValue() > 0)
 			{
 				gains.add(line);
 			}
-			else if (f.getValue() < 0)
+			else if (f.getOwnValue() < 0)
 			{
 				losses.add(line);
 			}
@@ -140,7 +155,7 @@ public final class Report
 		losses.sort(Comparator.comparingLong(Line::getValue));
 		movers.sort(Comparator.comparingLong((Line l) -> Math.abs(l.getDrift())).reversed());
 		return new Report(from, covered, end - play - market, end, play, market,
-			head(gains, limit), head(losses, limit), head(movers, limit));
+			head(gains, limit), head(losses, limit), head(movers, limit), channels);
 	}
 
 	/** Every item held, most valuable first. */
@@ -208,6 +223,23 @@ public final class Report
 	public List<Line> getLosses()
 	{
 		return losses;
+	}
+
+	/** Part of the play by where it came from; pages written before this was kept count as nothing. */
+	public long channel(Channel channel)
+	{
+		return channels[channel.ordinal()];
+	}
+
+	/** Play the pages do not say where it came from, as on pages written before that was kept. */
+	public long unexplained()
+	{
+		long sum = 0;
+		for (long c : channels)
+		{
+			sum += c;
+		}
+		return play - sum;
 	}
 
 	public List<Line> getMovers()

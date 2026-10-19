@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -32,6 +33,12 @@ public final class Ledger
 	static final int BOND = 13190;
 	static final int LOOTING_BAG = 11941;
 	static final int LOOTING_BAG_OPEN = 22586;
+	/** Items whose trades are remembered at most; those no longer held and traded longest ago go first. */
+	static final int BOOK = 300;
+	/** How long after dying items leaving the account are lost to the death rather than used. */
+	static final long DYING_MS = 30_000;
+	/** How long after dying getting the same items back counts against that death. */
+	static final long REGAIN_MS = 6 * 3_600_000L;
 
 	private Map<Store, Holding> stores = new LinkedHashMap<>();
 	private Map<Integer, Long> prices = new HashMap<>();
@@ -41,11 +48,44 @@ public final class Ledger
 	private long since;
 	/** Each Grand Exchange slot as last seen; missing from ledgers saved before slots were kept. */
 	private Map<Integer, Offer> exchange = new HashMap<>();
+	/** Each item's standing on the exchange since the ledger began watching trades. */
+	private Map<Integer, Position> book = new HashMap<>();
+	/**
+	 * True once the slots have been seen whole while the ledger was open, so an offer seen for the
+	 * first time after that was placed since and its progress is trading done since.
+	 */
+	private boolean slotsKnown;
+	/** What the last death took, by item, while getting it back still counts against it. */
+	private Map<Integer, Long> lost = new HashMap<>();
+	private long lostUntil;
 
 	private transient Map<Store, Map<Integer, Long>> pending;
 	/** Slots seen since the last settle; a null offer is an empty slot. */
 	private transient Map<Integer, Offer> pendingOffers;
 	private transient boolean atExchange;
+	private transient long dyingUntil;
+	/** Trades seen at the last settle of the exchange. */
+	private transient List<Fill> fills;
+
+	/** Part of an offer that traded between two sightings of its slot. */
+	private static final class Fill
+	{
+		final int item;
+		final boolean buy;
+		final long quantity;
+		/** Coins paid for a buy, or received before tax for a sale. */
+		final long coins;
+		final long tax;
+
+		Fill(int item, boolean buy, long quantity, long coins, long tax)
+		{
+			this.item = item;
+			this.buy = buy;
+			this.quantity = quantity;
+			this.coins = coins;
+			this.tax = tax;
+		}
+	}
 
 	/** One place as last seen. */
 	public static final class Holding
@@ -138,6 +178,17 @@ public final class Ledger
 		this.atExchange = atExchange;
 	}
 
+	/**
+	 * The player died: what leaves the account in the next moments is lost to the death, and what
+	 * comes back from the gravestone or Death in the hours after is set against it.
+	 */
+	public void died(long now)
+	{
+		dyingUntil = now + DYING_MS;
+		lost = new HashMap<>();
+		lostUntil = now + REGAIN_MS;
+	}
+
 	public boolean hasPending()
 	{
 		return pending != null && !pending.isEmpty() || pendingOffers != null && !pendingOffers.isEmpty();
@@ -157,7 +208,7 @@ public final class Ledger
 		{
 			pending = new EnumMap<>(Store.class);
 		}
-		Map<Integer, Long> collected = settleExchange();
+		Map<Integer, Long> collected = settleExchange(wasReady);
 		emptyLostLootingBag();
 		if (!pending.isEmpty())
 		{
@@ -186,6 +237,17 @@ public final class Ledger
 		boolean ready = isReady();
 		boolean opening = ready && !wasReady;
 		Day day = ready && !opening ? today(now, zone) : null;
+		// What trading moved, by item, so it can be told apart from everything else that came and went.
+		Map<Integer, Long> traded = new HashMap<>();
+		if (day != null)
+		{
+			for (Fill f : fills)
+			{
+				traded.merge(f.item, f.buy ? f.quantity : -f.quantity, Long::sum);
+				traded.merge(COINS, f.buy ? -f.coins : f.coins - f.tax, Long::sum);
+			}
+			ids.addAll(traded.keySet());
+		}
 		long play = 0;
 		long drift = 0;
 		long foundValue = 0;
@@ -207,9 +269,12 @@ public final class Ledger
 			foundValue += found.getOrDefault(id, 0L) * oldPrice;
 			play += value;
 			drift += moved;
-			if (day != null && (newQ != oldQ || moved != 0))
+			if (day != null)
 			{
-				day.flow(id, newQ - oldQ, value, moved);
+				long tq = traded.getOrDefault(id, 0L);
+				day.flow(id, newQ - oldQ, value, moved, tq, tq * price);
+				day.channel(Channel.EXCHANGE, tq * price);
+				channel(day, id, newQ - oldQ - tq, price, now);
 			}
 			if (newQ > 0)
 			{
@@ -235,6 +300,7 @@ public final class Ledger
 		total = worth;
 		if (day != null)
 		{
+			changed |= book(day, after, now);
 			if (foundValue != 0)
 			{
 				day.found(foundValue);
@@ -256,10 +322,11 @@ public final class Ledger
 	 *
 	 * @return what was collected and did not reach the inventory
 	 */
-	private Map<Integer, Long> settleExchange()
+	private Map<Integer, Long> settleExchange(boolean ready)
 	{
 		boolean changed = false;
 		Map<Integer, Long> collected = new HashMap<>();
+		fills = new ArrayList<>();
 		if (pendingOffers != null && !pendingOffers.isEmpty())
 		{
 			for (Map.Entry<Integer, Offer> e : pendingOffers.entrySet())
@@ -268,12 +335,21 @@ public final class Ledger
 				Offer next = e.getValue();
 				if (next != null && next.same(old))
 				{
+					fill(next, old);
 					next.carry(old);
 				}
-				else if (old != null)
+				else
 				{
-					// Collected, or collected elsewhere and the slot used again since.
-					addAll(collected, old.contents());
+					if (old != null)
+					{
+						// Collected, or collected elsewhere and the slot used again since.
+						addAll(collected, old.contents());
+					}
+					if (next != null && slotsKnown)
+					{
+						// Placed since the slots were last seen; whatever it has done was traded since.
+						fill(next, null);
+					}
 				}
 				if (next == null)
 				{
@@ -286,6 +362,7 @@ public final class Ledger
 				changed = true;
 			}
 			pendingOffers.clear();
+			slotsKnown |= ready;
 		}
 
 		Map<Integer, Long> gains = inventoryGains();
@@ -316,6 +393,105 @@ public final class Ledger
 			pending.put(Store.GRAND_EXCHANGE, held);
 		}
 		return collected;
+	}
+
+	/** Notes what an offer traded since it was last seen, if anything. */
+	private void fill(Offer next, Offer old)
+	{
+		long quantity = next.getDone() - (old == null ? 0 : old.getDone());
+		if (quantity <= 0)
+		{
+			return;
+		}
+		long coins = next.getSpent() - (old == null ? 0 : old.getSpent());
+		long tax = next.isBuy() ? 0 : next.tax() - (old == null ? 0 : old.tax());
+		fills.add(new Fill(next.getItem(), next.isBuy(), quantity, Math.max(0, coins), Math.max(0, tax)));
+	}
+
+	/**
+	 * Books what an item did to the day, other than by trading, to where it came from: loot or
+	 * supplies, coins in or out, or a death.
+	 *
+	 * @param own the quantity gained or lost other than by trading
+	 */
+	private void channel(Day day, int id, long own, long price, long now)
+	{
+		if (own == 0 || price <= 0)
+		{
+			return;
+		}
+		if (own < 0 && now <= dyingUntil)
+		{
+			day.channel(Channel.DEATHS, own * price);
+			lost.merge(id, -own, Long::sum);
+			return;
+		}
+		if (own > 0 && now <= lostUntil && lost.containsKey(id))
+		{
+			long back = Math.min(own, lost.get(id));
+			day.channel(Channel.DEATHS, back * price);
+			lost.put(id, lost.get(id) - back);
+			lost.values().removeIf(q -> q <= 0);
+			own -= back;
+			if (own == 0)
+			{
+				return;
+			}
+		}
+		if (id == COINS)
+		{
+			day.channel(own > 0 ? Channel.COINS_IN : Channel.COINS_OUT, own * price);
+		}
+		else
+		{
+			day.channel(own > 0 ? Channel.LOOT : Channel.USED, own * price);
+		}
+	}
+
+	/**
+	 * Books the trades of the last settle: each item's position on the exchange and the day's
+	 * deals. Items bought that have since left the account other than by a sale leave the position.
+	 *
+	 * @return true when anything was traded
+	 */
+	private boolean book(Day day, Map<Integer, Long> held, long now)
+	{
+		if (now > lostUntil && !lost.isEmpty())
+		{
+			lost.clear();
+		}
+		for (Fill f : fills)
+		{
+			Position position = book.computeIfAbsent(f.item, k -> new Position());
+			Deal deal = day.deal(f.item);
+			if (f.buy)
+			{
+				position.bought(f.quantity, f.coins, now);
+				deal.bought(f.quantity, f.coins);
+				day.getTrades().bought(f.quantity, f.coins);
+			}
+			else
+			{
+				position.sold(f.quantity, f.coins - f.tax, f.tax, now, deal, day.getTrades());
+			}
+		}
+		for (Map.Entry<Integer, Position> e : book.entrySet())
+		{
+			e.getValue().holdAtMost(held.getOrDefault(e.getKey(), 0L));
+		}
+		if (book.size() > BOOK)
+		{
+			List<Map.Entry<Integer, Position>> old = new ArrayList<>(book.entrySet());
+			old.sort(Comparator.comparing((Map.Entry<Integer, Position> e) -> e.getValue().getHeld() > 0)
+				.thenComparingLong(e -> e.getValue().getTime()));
+			for (int i = 0; i < old.size() - BOOK; i++)
+			{
+				book.remove(old.get(i).getKey());
+			}
+		}
+		boolean traded = !fills.isEmpty();
+		fills.clear();
+		return traded;
 	}
 
 	/** Items the inventory gained since it was last seen, when it is being seen now. */
@@ -398,6 +574,7 @@ public final class Ledger
 		if (last != null)
 		{
 			last.trim(Day.KEPT_ITEMS);
+			last.trimDeals(Day.KEPT_DEALS);
 		}
 		Day day = new Day(date, total);
 		days.add(day);
@@ -459,6 +636,12 @@ public final class Ledger
 	public Map<Integer, Offer> getOffers()
 	{
 		return Collections.unmodifiableMap(new java.util.TreeMap<>(exchange));
+	}
+
+	/** Each item's standing on the exchange since the ledger began watching trades. */
+	public Map<Integer, Position> getBook()
+	{
+		return Collections.unmodifiableMap(book);
 	}
 
 	/** What a set of items is worth at the last settle's prices. */
@@ -536,6 +719,15 @@ public final class Ledger
 			exchange = new HashMap<>();
 		}
 		exchange.values().removeIf(o -> o == null);
+		if (book == null)
+		{
+			book = new HashMap<>();
+		}
+		book.values().removeIf(p -> p == null);
+		if (lost == null)
+		{
+			lost = new HashMap<>();
+		}
 		return this;
 	}
 }
