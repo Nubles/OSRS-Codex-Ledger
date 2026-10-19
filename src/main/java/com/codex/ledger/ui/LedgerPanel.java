@@ -611,8 +611,8 @@ public class LedgerPanel extends PluginPanel
 
 	static String offerNote(Offer o)
 	{
-		String done = String.format("%,d", o.getDone());
-		String total = String.format("%,d", o.getTotal());
+		String done = Format.whole(o.getDone());
+		String total = Format.whole(o.getTotal());
 		if (o.isActive())
 		{
 			return (o.isBuy() ? "Bought " : "Sold ") + done + " of " + total;
@@ -916,9 +916,9 @@ public class LedgerPanel extends PluginPanel
 				String name = name(o.getItemId());
 				long each = Math.round(o.getCost() / (double) o.getQuantity());
 				long now = Math.round(o.getWorth() / (double) o.getQuantity());
-				list.add(new ItemRow(o.getItemId(), name, String.format("%,d", o.getQuantity()) + " at " + Format.coins(each) + ", now " + Format.coins(now),
+				list.add(new ItemRow(o.getItemId(), name, Format.whole(o.getQuantity()) + " at " + Format.coins(each) + ", now " + Format.coins(now),
 					Format.signed(o.gain()), Theme.signed(o.gain()), -1, icons,
-					name + ": " + String.format("%,d", o.getQuantity()) + " bought for " + Format.coins(o.getCost()) + " would sell for "
+					name + ": " + Format.whole(o.getQuantity()) + " bought for " + Format.coins(o.getCost()) + " would sell for "
 						+ Format.coins(o.getWorth()) + " after tax at today's price."));
 			}
 			stack.add(list);
@@ -926,7 +926,7 @@ public class LedgerPanel extends PluginPanel
 
 		if (total.getUnmatched() > 0)
 		{
-			stack.add(Ui.wrapped("Sold " + String.format("%,d", total.getUnmatched()) + (total.getUnmatched() == 1 ? " item" : " items")
+			stack.add(Ui.wrapped("Sold " + Format.whole(total.getUnmatched()) + (total.getUnmatched() == 1 ? " item" : " items")
 				+ " for " + Format.coins(total.getUnmatchedCoins()) + " that were not bought while the ledger watched (loot, or bought before),"
 				+ " so no profit or loss is counted on them.", Theme.small(), Theme.TEXT_FAINT, WIDTH - 10));
 		}
@@ -939,8 +939,8 @@ public class LedgerPanel extends PluginPanel
 	/** "Bought 1,000 · sold 1,000 · +26%", or what is known when only one side traded. */
 	static String tradeNote(Deal d)
 	{
-		String bought = d.getBought() > 0 ? "Bought " + String.format("%,d", d.getBought()) : null;
-		String sold = d.getSold() > 0 ? "sold " + String.format("%,d", d.getSold()) : null;
+		String bought = d.getBought() > 0 ? "Bought " + Format.whole(d.getBought()) : null;
+		String sold = d.getSold() > 0 ? "sold " + Format.whole(d.getSold()) : null;
 		if (bought == null && sold == null)
 		{
 			return "";
@@ -951,10 +951,10 @@ public class LedgerPanel extends PluginPanel
 		}
 		if (bought == null && d.getUnmatched() >= d.getSold())
 		{
-			return "Sold " + String.format("%,d", d.getSold()) + ", not bought here";
+			return "Sold " + Format.whole(d.getSold()) + ", not bought here";
 		}
-		String text = bought == null ? "Sold " + String.format("%,d", d.getSold())
-			: d.getBought() == d.getSold() ? "Flipped " + String.format("%,d", d.getSold()) : bought + ", " + sold;
+		String text = bought == null ? "Sold " + Format.whole(d.getSold())
+			: d.getBought() == d.getSold() ? "Flipped " + Format.whole(d.getSold()) : bought + ", " + sold;
 		double roi = d.roi();
 		return roi == 0 ? text : text + ", " + Format.signedPercent(roi);
 	}
@@ -964,16 +964,16 @@ public class LedgerPanel extends PluginPanel
 		StringBuilder tip = new StringBuilder(name).append(": ");
 		if (d.getBought() > 0)
 		{
-			tip.append("bought ").append(String.format("%,d", d.getBought())).append(" for ").append(Format.coins(d.getBuyCoins())).append(". ");
+			tip.append("bought ").append(Format.whole(d.getBought())).append(" for ").append(Format.coins(d.getBuyCoins())).append(". ");
 		}
 		if (d.getSold() > 0)
 		{
-			tip.append("Sold ").append(String.format("%,d", d.getSold())).append(" for ").append(Format.coins(d.getSaleCoins()))
+			tip.append("Sold ").append(Format.whole(d.getSold())).append(" for ").append(Format.coins(d.getSaleCoins()))
 				.append(" after ").append(Format.coins(d.getTax())).append(" tax, ").append(Format.signed(d.getProfit())).append(" profit.");
 		}
 		if (d.getUnmatched() > 0)
 		{
-			tip.append(' ').append(String.format("%,d", d.getUnmatched())).append(" of them were never bought here.");
+			tip.append(' ').append(Format.whole(d.getUnmatched())).append(" of them were never bought here.");
 		}
 		return tip.toString().trim();
 	}
@@ -1017,11 +1017,11 @@ public class LedgerPanel extends PluginPanel
 			Report.Line l = lines.get(i);
 			String name = name(l.getItemId());
 			long each = ledger.price(l.getItemId());
-			String note = each <= 1 ? String.format("%,d", l.getQuantity())
-				: l.getQuantity() > 1 ? String.format("%,d x %s", l.getQuantity(), Format.coins(each)) : Format.coins(each) + " each";
+			String note = each <= 1 ? Format.whole(l.getQuantity())
+				: l.getQuantity() > 1 ? Format.whole(l.getQuantity()) + " x " + Format.coins(each) : Format.coins(each) + " each";
 			Color color = i == 0 ? Theme.GOLD_BRIGHT : Theme.GOLD;
 			list.add(new ItemRow(l.getItemId(), name, note, Format.coins(l.getValue()), color, l.getValue() / (double) total, icons,
-				name + ": " + String.format("%,d", l.getQuantity()) + ", worth " + Format.coins(l.getValue()) + ". " + places(l.getItemId())));
+				name + ": " + Format.whole(l.getQuantity()) + ", worth " + Format.coins(l.getValue()) + ". " + places(l.getItemId())));
 		}
 		stack.add(list);
 		if (lines.size() > HOARD)
@@ -1068,9 +1068,9 @@ public class LedgerPanel extends PluginPanel
 		}
 		stack.add(new SectionHeader("Better alched", Format.signed(a.getGain())));
 		long minutes = Math.max(1, Math.round(a.getCasts() * 60.0 / CASTS_AN_HOUR));
-		String time = minutes < 60 ? minutes + " minutes" : String.format("%.1f hours", minutes / 60.0);
+		String time = minutes < 60 ? minutes + " minutes" : Format.hours(minutes / 60.0);
 		stack.add(Ui.wrapped("High Level Alchemy beats selling these by " + Format.coins(a.getGain()) + ", after nature runes and the "
-			+ "exchange's tax: " + String.format("%,d", a.getCasts()) + " casts, about " + time + " and "
+			+ "exchange's tax: " + Format.whole(a.getCasts()) + " casts, about " + time + " and "
 			+ Format.compact(a.getCasts() * CAST_XP) + " Magic xp.", Theme.small(), Theme.TEXT_MUTED, WIDTH - 10));
 		JPanel list = new JPanel(new GridLayout(0, 1, 0, 2));
 		list.setOpaque(false);
@@ -1080,7 +1080,7 @@ public class LedgerPanel extends PluginPanel
 		{
 			Alchemy.Line l = lines.get(i);
 			String name = name(l.getItemId());
-			String note = String.format("%,d x %s more", l.getQuantity(), Format.coins(l.getAlch() - l.getSale()));
+			String note = Format.whole(l.getQuantity()) + " x " + Format.coins(l.getAlch() - l.getSale()) + " more";
 			list.add(new ItemRow(l.getItemId(), name, note, Format.signed(l.gain()), Theme.TEAL, l.gain() / (double) top, icons,
 				name + ": alched for " + Format.coins(l.getAlch()) + " each after a nature rune, against "
 					+ Format.coins(l.getSale()) + " each sold after tax."));
@@ -1101,7 +1101,7 @@ public class LedgerPanel extends PluginPanel
 			Long q = e.getValue().getItems().get(itemId);
 			if (q != null && q > 0)
 			{
-				text.append(text.length() == 0 ? "" : ", ").append(e.getKey().getLabel()).append(' ').append(String.format("%,d", q));
+				text.append(text.length() == 0 ? "" : ", ").append(e.getKey().getLabel()).append(' ').append(Format.whole(q));
 			}
 		}
 		return text.toString();

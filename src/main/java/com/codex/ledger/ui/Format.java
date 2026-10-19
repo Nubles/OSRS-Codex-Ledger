@@ -85,6 +85,18 @@ public final class Format
 		return gp > 0 ? "+" + amount(gp) : gp < 0 ? "-" + amount(-gp) : "0";
 	}
 
+	/** A whole number written in full with thousands commas, whatever the computer's language: "1,240". */
+	public static String whole(long n)
+	{
+		return String.format(Locale.ENGLISH, "%,d", n);
+	}
+
+	/** Hours to one decimal place, with a full stop whatever the computer's language: "1.5 hours". */
+	public static String hours(double hours)
+	{
+		return String.format(Locale.ENGLISH, "%.1f", hours) + " hours";
+	}
+
 	/** A quantity change with its sign, written in full: "+1,240", "-6". */
 	public static String count(long n)
 	{
