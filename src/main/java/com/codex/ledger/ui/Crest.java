@@ -32,6 +32,12 @@ public class Crest extends JComponent
 	private final boolean[] hasChange = new boolean[3];
 	private static final String[] PERIODS = {"Today", "Week", "Month"};
 
+	// The large figure is drawn small then doubled; while the count runs this would be a new image
+	// every frame, so the last one is kept and reused until its text changes.
+	private String largeText;
+	private BufferedImage largeImage;
+	private int largeAscent;
+
 	public Crest()
 	{
 		setOpaque(false);
@@ -54,6 +60,11 @@ public class Crest extends JComponent
 			this.total = total;
 			count.set(total, animate);
 		}
+		else
+		{
+			// The next figure shown, perhaps another account's, appears at once rather than counting from this one.
+			this.total = 0;
+		}
 		for (int i = 0; i < 3; i++)
 		{
 			hasChange[i] = changes != null && changes[i] != null;
@@ -68,10 +79,27 @@ public class Crest extends JComponent
 	 *
 	 * @return the width drawn
 	 */
-	private static int paintLarge(Graphics2D g, String text, int x, int y)
+	private int paintLarge(Graphics2D g, String text, int x, int y)
 	{
-		Font font = Theme.title();
-		FontMetrics fm = g.getFontMetrics(font);
+		if (!text.equals(largeText) || largeImage == null)
+		{
+			Font font = Theme.title();
+			FontMetrics fm = g.getFontMetrics(font);
+			largeImage = renderSmall(text, font, fm);
+			largeAscent = fm.getAscent();
+			largeText = text;
+		}
+		int w = largeImage.getWidth();
+		int h = largeImage.getHeight();
+		Graphics2D lg = (Graphics2D) g.create();
+		lg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+		lg.drawImage(largeImage, x, y - 2 * largeAscent + 22, w * 2, h * 2, null);
+		lg.dispose();
+		return w * 2;
+	}
+
+	private static BufferedImage renderSmall(String text, Font font, FontMetrics fm)
+	{
 		int w = Math.max(1, fm.stringWidth(text) + 1);
 		int h = fm.getHeight() + 1;
 		BufferedImage small = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
@@ -84,11 +112,7 @@ public class Crest extends JComponent
 		sg.setPaint(new GradientPaint(0, base - fm.getAscent() + 3, Theme.GOLD_BRIGHT, 0, base, Theme.GOLD));
 		sg.drawString(text, 0, base);
 		sg.dispose();
-		Graphics2D lg = (Graphics2D) g.create();
-		lg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-		lg.drawImage(small, x, y - 2 * fm.getAscent() + 22, w * 2, h * 2, null);
-		lg.dispose();
-		return w * 2;
+		return small;
 	}
 
 	@Override
@@ -120,7 +144,7 @@ public class Crest extends JComponent
 		int room = w - tx - 8;
 		g.setFont(Theme.small());
 		FontMetrics small = g.getFontMetrics();
-		String heading = (player != null ? player + "  -  " : "") + "NET WORTH";
+		String heading = (player != null ? player + "  \u00b7  " : "") + "NET WORTH";
 		g.setColor(Theme.TEXT_MUTED);
 		g.drawString(Ui.clip(heading, small, room), tx, 22);
 

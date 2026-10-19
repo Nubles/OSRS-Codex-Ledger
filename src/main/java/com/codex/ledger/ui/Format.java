@@ -133,6 +133,26 @@ public final class Format
 		return LONG_DAY.format(date);
 	}
 
+	/** How long between two milestones: "the same day", "5 hours", "16 days", "3 months". */
+	public static String gap(long ms)
+	{
+		long hours = Math.max(0, ms) / 3_600_000L;
+		if (hours < 1)
+		{
+			return "under an hour";
+		}
+		if (hours < 24)
+		{
+			return plural(hours, "hour");
+		}
+		long days = hours / 24;
+		if (days < 90)
+		{
+			return plural(days, "day");
+		}
+		return plural(days / 30, "month");
+	}
+
 	/** "just now", "12m ago", "3h ago", "2d ago". */
 	public static String ago(long ms)
 	{

@@ -85,17 +85,19 @@ class StoreBreakdown extends JComponent
 		int y = BAR + 8;
 		for (Part p : parts)
 		{
-			Color c = Theme.store(p.store);
+			// An empty place steps back so the eye goes to where the worth actually is.
+			boolean empty = p.value == 0;
+			Color c = empty ? Theme.alpha(Theme.store(p.store), 90) : Theme.store(p.store);
 			int mid = y + ROW / 2 - 1;
 			g.setColor(c);
 			g.fill(new Ellipse2D.Float(1, mid - 3.5f, 7, 7));
 			int base = mid + fm.getAscent() / 2 - 1;
-			Ui.shadowed(g, p.store.getLabel(), 14, base, Theme.TEXT);
+			Ui.shadowed(g, p.store.getLabel(), 14, base, empty ? Theme.TEXT_MUTED : Theme.TEXT);
 			String value = p.seenAgo == NEVER ? "-" : Format.coins(p.value);
 			String pct = p.seenAgo == NEVER ? "" : Format.percent(Math.max(0, p.value) / (double) total);
 			int vw = fm.stringWidth(value);
 			int pw = 30;
-			Ui.shadowed(g, value, w - pw - vw - 4, base, Theme.mix(c, Theme.TEXT, 0.35));
+			Ui.shadowed(g, value, w - pw - vw - 4, base, empty ? Theme.TEXT_FAINT : Theme.mix(c, Theme.TEXT, 0.35));
 			g.setColor(Theme.TEXT_FAINT);
 			g.drawString(pct, w - fm.stringWidth(pct), base);
 			String seen = p.seenAgo == NEVER ? "not seen yet" : p.seenAgo < 0 ? "" : "seen " + Format.ago(p.seenAgo);
