@@ -135,15 +135,18 @@ public final class Format
 	public static String[] shares(long[] values, long whole)
 	{
 		int[] points = sharePoints(values, whole);
-		boolean sliver = false;
-		for (int i = 0; i < values.length; i++)
+		long sum = 0;
+		for (long v : values)
 		{
-			sliver |= points[i] == 0 && values[i] > 0;
+			sum += Math.max(0, v);
 		}
+		long all = Math.max(whole, sum);
 		String[] out = new String[values.length];
 		for (int i = 0; i < values.length; i++)
 		{
-			out[i] = points[i] == 0 && values[i] > 0 ? "<1%" : points[i] >= 100 && sliver ? ">99%" : points[i] + "%";
+			// A share rounded up to 100% that is short of the whole (a sliver beside it, or the rest not
+			// listed) reads ">99%": only all of it is 100%.
+			out[i] = points[i] == 0 && values[i] > 0 ? "<1%" : points[i] >= 100 && values[i] < all ? ">99%" : points[i] + "%";
 		}
 		return out;
 	}

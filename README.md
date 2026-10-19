@@ -55,7 +55,7 @@ The ledger begins the first time you open your bank. Each place is remembered as
 
 Deaths are booked to the death, less what you get back from the gravestone or Death within the hour; safe deaths (raids, Inferno, Fight Caves, Colosseum and the safe minigames) take nothing. Places the game does not show (POH storage, STASH units, item sacks) are not counted, so putting items there shows as gold going out.
 
-The ledger is saved per account in your RuneLite profile, every few minutes and when you log out, and kept under about 200 KB by thinning the oldest detail. A save damaged in part keeps everything that can still be read; one that cannot be read at all is set aside rather than written over.
+The ledger is saved per account in your RuneLite profile, every few minutes and when you log out, and kept under about 200 KB by thinning the oldest detail. A save damaged in part keeps everything that can still be read, and any save that could not be read whole is first copied aside (one copy, under `ledgerUnreadable`) so the next save never writes over the only copy.
 
 ## Rules posture
 

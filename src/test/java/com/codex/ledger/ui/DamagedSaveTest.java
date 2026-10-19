@@ -32,6 +32,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -237,6 +238,37 @@ public class DamagedSaveTest
 		assertNotNull(read);
 		assertEquals(before.getHistory().size(), read.getHistory().size());
 		assertEquals(before.value(Store.BANK), read.value(Store.BANK));
+	}
+
+	@Test
+	public void whateverIsLeftOutIsSetAsideBeforeItIsWrittenOver()
+	{
+		Ledger before = good();
+		String whole = GSON.toJson(before);
+		assertFalse(Ledger.read(GSON, whole).isMended());
+		// A broken day page is left out, and the next save writes over it: the read says so, so the plugin
+		// keeps the save aside (it once did only when nothing at all could be read).
+		JsonObject damaged = tree(whole);
+		damaged.getAsJsonArray("days").set(0, PARSER.parse("\"garbage\""));
+		Ledger read = Ledger.read(GSON, damaged.toString());
+		assertNotNull(read);
+		assertTrue(read.isMended());
+		// A place only a later version knows is left out too, even when the rest reads whole.
+		damaged = tree(whole);
+		damaged.getAsJsonObject("stores").add("SAILING_HOLD", PARSER.parse("{\"seen\":1,\"items\":{\"995\":5}}"));
+		assertTrue(Ledger.read(GSON, damaged.toString()).isMended());
+		// One copy is kept: the first, then only a save at least as full, never a stub over it.
+		assertTrue(Ledger.setAside(null, whole));
+		assertFalse(Ledger.setAside(whole, whole));
+		assertFalse(Ledger.setAside(whole, "{\"total\":1"));
+		assertTrue(Ledger.setAside("{\"total\":1", whole));
+		assertFalse(Ledger.setAside(null, " "));
+		StringBuilder huge = new StringBuilder();
+		while (huge.length() <= Ledger.MAX_ASIDE)
+		{
+			huge.append(whole);
+		}
+		assertFalse(Ledger.setAside(null, huge.toString()));
 	}
 
 	/** Reads the save as the plugin does at login, then plays, saves, shows and shares it; fails on any exception. */

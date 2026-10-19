@@ -118,6 +118,11 @@ public class FormatTest
 		// All of it really is 100%, and nothing alongside is hidden by the fix.
 		assertArrayEquals(new String[]{"100%", "0%"}, Format.shares(new long[]{1000, 0}, 1000));
 		assertArrayEquals(new String[]{"99%", "1%"}, Format.shares(new long[]{990, 10}, 1000));
+		// The rows listed may not be all of the whole (the hoard lists the dearest few): one item that is
+		// 99.6% of the worth, the rest unlisted, still is not all of it.
+		assertArrayEquals(new String[]{">99%"}, Format.shares(new long[]{996}, 1000));
+		assertArrayEquals(new String[]{">99%", "0%"}, Format.shares(new long[]{996, 0}, 1000));
+		assertArrayEquals(new String[]{"100%"}, Format.shares(new long[]{1000}, 1000));
 		// One share on its own, such as a goal's progress, never reads full while short of it.
 		assertEquals(">99%", Format.percent(0.996));
 		assertEquals("99%", Format.percent(0.994));

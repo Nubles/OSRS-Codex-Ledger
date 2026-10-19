@@ -83,6 +83,10 @@ public final class Ledger
 	private transient IntFunction<Kind> kinds;
 	/** When play time was last counted, or 0 after a gap. */
 	private transient long lastPlayed;
+	/** True when reading the save had to leave part of it out; see {@link #isMended()}. */
+	private transient boolean mended;
+	/** The longest damaged save set aside; one past it is only logged, so the profile never doubles in size for it. */
+	public static final int MAX_ASIDE = 1_000_000;
 
 	/** Part of an offer that traded between two sightings of its slot. */
 	private static final class Fill
@@ -889,6 +893,7 @@ public final class Ledger
 			return null;
 		}
 		Ledger read = parse(gson, json);
+		boolean partial = read == null;
 		if (read == null)
 		{
 			JsonElement root;
@@ -916,7 +921,36 @@ public final class Ledger
 			}
 			read = parse(gson, mended.toString());
 		}
-		return read == null ? null : read.repair();
+		if (read == null)
+		{
+			return null;
+		}
+		// A place only a later version knows reads as no place at all, and is left out below.
+		read.mended = partial || read.stores != null && read.stores.containsKey(null);
+		return read.repair();
+	}
+
+	/**
+	 * True when this ledger was read from a save that could not be read whole: part of it was left
+	 * out, and the next save writes over it, so the save is set aside first.
+	 */
+	public boolean isMended()
+	{
+		return mended;
+	}
+
+	/**
+	 * Whether a save that could not be read whole should be set aside in place of the copy already
+	 * there, which is kept to just one: yes when there is none, and otherwise only for a save at least
+	 * as long, so a later stub (a ledger begun again, then damaged) never replaces a fuller copy.
+	 */
+	public static boolean setAside(String kept, String damaged)
+	{
+		if (damaged == null || damaged.trim().isEmpty() || damaged.length() > MAX_ASIDE)
+		{
+			return false;
+		}
+		return kept == null || kept.isEmpty() || !kept.equals(damaged) && damaged.length() >= kept.length();
 	}
 
 	private static Ledger parse(Gson gson, String json)

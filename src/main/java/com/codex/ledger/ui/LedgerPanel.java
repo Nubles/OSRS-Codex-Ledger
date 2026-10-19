@@ -1213,8 +1213,10 @@ public class LedgerPanel extends PluginPanel
 		}
 		Card head = new Card(new BorderLayout(0, 4));
 		head.highlighted(true);
-		head.add(Ui.label(lines.size() + " kinds of item", Theme.title(), Theme.GOLD_BRIGHT), BorderLayout.NORTH);
-		head.add(Ui.wrapped((lines.size() > 5 ? "Your five most valuable hold " + (topFive == 0 ? "<1" : String.valueOf(topFive)) + "% of your worth."
+		head.add(Ui.label(Format.plural(lines.size(), "kind") + " of item", Theme.title(), Theme.GOLD_BRIGHT), BorderLayout.NORTH);
+		// With more held than the five, they are never all of it, however the shares round.
+		String five = topFive == 0 ? "<1" : topFive >= 100 ? ">99" : String.valueOf(topFive);
+		head.add(Ui.wrapped((lines.size() > 5 ? "Your five most valuable hold " + five + "% of your worth."
 			: "Everything you hold is listed below.")
 			+ (ledger.isReady() ? "" : " Open your bank to count the rest."), Theme.small(), Theme.TEXT_MUTED, WIDTH - 30), BorderLayout.CENTER);
 		stack.add(head);

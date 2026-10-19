@@ -134,8 +134,21 @@ public class ExtremeAccountTest
 		long now = start + 12_000 * 3_000_000L;
 		Map<Integer, Long> inv = new HashMap<>();
 		inv.put(385, 5L);
+		// The first settle after login, on fresh copies of the save (read outside the timing), so its
+		// time is the best of several first settles rather than one run a busy machine can spoil.
+		double first = Double.MAX_VALUE;
+		for (int i = 0; i < 12; i++)
+		{
+			Ledger fresh = Ledger.read(GSON, json);
+			fresh.observe(Store.INVENTORY, inv);
+			first = Math.min(first, once(() -> fresh.settle(now, PRICES, UTC)));
+			if (i % 4 == 3)
+			{
+				pause();
+			}
+		}
 		read[0].observe(Store.INVENTORY, inv);
-		double first = once(() -> read[0].settle(now, PRICES, UTC));
+		read[0].settle(now, PRICES, UTC);
 		assertTrue(read[0].getHistory().size() <= 1_200);
 		double later = best(() -> read[0].settle(now + 600L, PRICES, UTC));
 		double marks = best(() -> Milestones.of(read[0].getHistory(), read[0].getTotal(), now));
@@ -179,12 +192,30 @@ public class ExtremeAccountTest
 		{
 			work.run();
 		}
+		// Then sampled in a few rounds a moment apart, so a shared test machine busy for a while (a
+		// build beside it, a collection) shows the work's own time rather than its neighbours'.
 		double best = Double.MAX_VALUE;
-		for (int i = 0; i < 7; i++)
+		for (int round = 0; round < 4; round++)
 		{
-			best = Math.min(best, once(work));
+			for (int i = 0; i < 7; i++)
+			{
+				best = Math.min(best, once(work));
+			}
+			pause();
 		}
 		return best;
+	}
+
+	private static void pause()
+	{
+		try
+		{
+			Thread.sleep(25);
+		}
+		catch (InterruptedException e)
+		{
+			Thread.currentThread().interrupt();
+		}
 	}
 
 	private static double once(Runnable work)

@@ -675,13 +675,15 @@ public class CodexLedgerPlugin extends Plugin
 		}
 		String saved = configManager.getRSProfileConfiguration(CodexLedgerConfig.GROUP, LEDGER_KEY);
 		ledger = Ledger.read(gson, saved);
-		if (ledger == null && saved != null && !saved.trim().isEmpty())
+		if ((ledger == null || ledger.isMended()) && saved != null && !saved.trim().isEmpty())
 		{
-			// Nothing in it could be read. The ledger starts afresh, but the old save is set aside first
-			// (once, never over an earlier one) so the next save does not write over the only copy.
-			log.warn("Could not read the saved ledger; it is kept as {} and the ledger starts afresh", DAMAGED_KEY);
-			if (configManager.getRSProfileConfiguration(CodexLedgerConfig.GROUP, DAMAGED_KEY) == null)
+			// Some or all of it could not be read (the ledger then keeps what it can, or starts afresh),
+			// and the next save writes over it. The save is set aside first as it was, one copy only,
+			// never over a fuller one (see Ledger.setAside).
+			String kept = configManager.getRSProfileConfiguration(CodexLedgerConfig.GROUP, DAMAGED_KEY);
+			if (Ledger.setAside(kept, saved))
 			{
+				log.warn("Part of the saved ledger could not be read; it is kept as it was as {}", DAMAGED_KEY);
 				configManager.setConfiguration(CodexLedgerConfig.GROUP, profile, DAMAGED_KEY, saved);
 			}
 		}
