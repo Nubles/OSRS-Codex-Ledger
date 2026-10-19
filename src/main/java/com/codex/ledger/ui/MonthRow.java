@@ -48,7 +48,9 @@ class MonthRow extends JComponent
 
 	static String tip(Months.Month m)
 	{
-		StringBuilder tip = new StringBuilder(title(m)).append(m.isCurrent() ? " so far: " : ": ")
+		StringBuilder tip = new StringBuilder(title(m))
+			.append(m.getFrom() == null ? "" : " from " + Format.day(m.getFrom()))
+			.append(m.isCurrent() ? " so far: " : ": ")
 			.append("play ").append(Format.signed(m.getPlay())).append(", market ").append(Format.signed(m.getMarket()))
 			.append(". ").append(m.isCurrent() ? "Worth now " : "Closed on ").append(Format.coins(m.getClose()))
 			.append(", over ").append(Format.plural(m.getPages(), "day")).append(" in the day book");
@@ -95,13 +97,22 @@ class MonthRow extends JComponent
 		int bx = w - 9 - BAR_W;
 		// "so far" for the month still running, else what it closed on; the best day follows when it fits.
 		String foot = month.isCurrent() ? "so far" : "closed " + Format.coins(month.getClose());
+
 		String best = best(month);
 		int room = bx - 6 - 10;
+		if (month.getFrom() != null)
+		{
+			// A month the day book holds only part of says where its pages begin; the close follows
+			// when it fits, and is always in the tooltip.
+			String from = "from " + BEST.format(month.getFrom());
+			String both = from + ", closed " + Format.coins(month.getClose());
+			foot = !month.isCurrent() && small.stringWidth(both) <= room ? both : from;
+		}
 		if (best != null && small.stringWidth(foot + " · " + best) <= room)
 		{
 			foot = foot + " · " + best;
 		}
-		else if (best != null && month.isCurrent() && small.stringWidth(best) <= room)
+		else if (best != null && month.isCurrent() && month.getFrom() == null && small.stringWidth(best) <= room)
 		{
 			foot = best;
 		}

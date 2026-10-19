@@ -58,7 +58,7 @@ public class LedgerPanel extends PluginPanel
 	private static final int[] SPAN_DAYS = {1, 7, 30, 0};
 	private static final int LINES = 6;
 	private static final int PAGES = 14;
-	/** Months of the day book listed; its 120 days of pages reach into at most five. */
+	/** Months of the day book listed, newest first; its 120 pages may reach back further when days are skipped. */
 	private static final int MONTHS = 5;
 	private static final int HOARD = 40;
 	private static final int TRADED = 12;

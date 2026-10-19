@@ -31,7 +31,7 @@ public class MonthRowTest
 		assertEquals("October 2026", MonthRow.title(months.get(0)));
 		assertEquals("best 1 Oct +26.0M", MonthRow.best(months.get(0)));
 		String tip = MonthRow.tip(months.get(1));
-		assertTrue(tip, tip.startsWith("September 2026: play +4.0M, market 0. Closed on 104.0M, over 2 days in the day book."));
+		assertTrue(tip, tip.startsWith("September 2026 from Tue 29 Sep: play +4.0M, market 0. Closed on 104.0M, over 2 days in the day book."));
 		assertTrue(tip, tip.endsWith("Best day Wed 30 Sep, +4.0M."));
 		assertTrue(MonthRow.tip(months.get(0)).startsWith("October 2026 so far: "));
 	}

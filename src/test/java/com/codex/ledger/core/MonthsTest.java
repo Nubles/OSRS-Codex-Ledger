@@ -102,4 +102,30 @@ public class MonthsTest
 		assertTrue(Months.of(Collections.emptyList(), LocalDate.of(2026, 10, 1), 6).isEmpty());
 		assertTrue(Months.of(null, LocalDate.of(2026, 10, 1), 6).isEmpty());
 	}
+
+	@Test
+	public void onlyTheDayBooksOldestMonthSaysWhereItsPagesBegin()
+	{
+		// 28 September to 4 October: September is held from the 28th only, October whole.
+		Ledger ledger = ledger(100_000_000L, 110_000_000L, 105_000_000L, 125_000_000L, 125_000_000L, 120_000_000L, 160_000_000L);
+		List<Months.Month> months = Months.of(ledger.getDays(), LocalDate.of(2026, 10, 4), 6);
+		assertNull(months.get(0).getFrom());
+		assertEquals(LocalDate.of(2026, 9, 28), months.get(1).getFrom());
+	}
+
+	@Test
+	public void aDayBookAcrossTheNewYearKeepsItsMonthsInOrder()
+	{
+		Day december = new Day("2025-12-31", 100);
+		Day january = new Day("2026-01-01", 100);
+		Day lastOctober = new Day("2025-10-01", 100);
+		List<Months.Month> months = Months.of(Arrays.asList(january, lastOctober, december), LocalDate.of(2026, 1, 1), 6);
+		assertEquals(3, months.size());
+		assertEquals("2026-01", months.get(0).getMonth().toString());
+		assertEquals("2025-12", months.get(1).getMonth().toString());
+		assertEquals("2025-10", months.get(2).getMonth().toString());
+		// The oldest begins on its 1st, so it is held whole; a month a year back is not today's.
+		assertNull(months.get(2).getFrom());
+		assertFalse(Months.of(Arrays.asList(lastOctober), LocalDate.of(2026, 10, 1), 6).get(0).isCurrent());
+	}
 }

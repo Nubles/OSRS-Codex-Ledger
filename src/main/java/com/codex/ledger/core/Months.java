@@ -25,7 +25,9 @@ public final class Months
 		private int pages;
 		private long playedMs;
 		private LocalDate best;
+		private LocalDate first;
 		private LocalDate last;
+		private LocalDate from;
 		private long bestChange;
 
 		Month(YearMonth month, boolean current)
@@ -88,6 +90,15 @@ public final class Months
 		{
 			return bestChange;
 		}
+
+		/**
+		 * The first page, when the day book itself begins (or was trimmed) partway through this month,
+		 * so its figures cover only part of it; null for a month the day book holds from its start.
+		 */
+		public LocalDate getFrom()
+		{
+			return from;
+		}
 	}
 
 	private Months()
@@ -130,6 +141,10 @@ public final class Months
 				month.last = date;
 				month.close = d.getClose();
 			}
+			if (month.first == null || date.isBefore(month.first))
+			{
+				month.first = date;
+			}
 			month.pages++;
 			month.playedMs += d.getPlayedMs();
 			long change = d.change();
@@ -138,6 +153,13 @@ public final class Months
 				month.best = date;
 				month.bestChange = change;
 			}
+		}
+		// Only the day book's oldest month can be cut short: the book began, or its oldest pages were
+		// let go, partway through it. Any later month was watched from its first day.
+		if (!months.isEmpty())
+		{
+			Month oldest = months.firstEntry().getValue();
+			oldest.from = oldest.first.getDayOfMonth() == 1 ? null : oldest.first;
 		}
 		out.addAll(months.values());
 		Collections.reverse(out);
