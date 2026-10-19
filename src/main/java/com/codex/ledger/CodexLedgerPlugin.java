@@ -226,12 +226,19 @@ public class CodexLedgerPlugin extends Plugin
 		clientThread.invokeLater(() ->
 		{
 			loadProfile();
-			if (client.getGameState() == GameState.LOGGED_IN)
+			GameState state = client.getGameState();
+			if (state == GameState.LOGGED_IN)
 			{
 				loggedInTicks = SYNC_TICKS;
 				observeAll();
 			}
-			else
+			else if (state == GameState.LOADING)
+			{
+				// Turned on during a teleport's loading screen: the player is in the world, so the read
+				// waits for LOGGED_IN like a login's would, but this is no login and gets no summary.
+				loggedInTicks = 0;
+			}
+			else if (state != GameState.HOPPING && state != GameState.CONNECTION_LOST)
 			{
 				// Turned on at the login screen, whose event has already gone by: the next login still gets its summary.
 				fromLoginScreen = true;
