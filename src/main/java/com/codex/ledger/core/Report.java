@@ -65,6 +65,7 @@ public final class Report
 	private long timedPlay;
 	private long[] kindsNow;
 	private long[] kindsBefore;
+	private long[] kindsMoved;
 
 	private Report(LocalDate from, int days, long start, long end, long play, long market, List<Line> gains, List<Line> losses, List<Line> movers,
 		long[] channels)
@@ -98,6 +99,7 @@ public final class Report
 		long timedPlay = 0;
 		long[] kindsBefore = null;
 		long[] kindsNow = null;
+		long[] kindsMoved = null;
 		for (Day day : ledger.getDays())
 		{
 			LocalDate date = LocalDate.parse(day.getDate());
@@ -110,6 +112,7 @@ public final class Report
 			{
 				kindsNow = day.getKinds();
 			}
+			kindsMoved = add(kindsMoved, day.getMoved());
 			if (day.getPlayedMs() > 0)
 			{
 				playedMs += day.getPlayedMs();
@@ -136,6 +139,7 @@ public final class Report
 		report.timedPlay = timedPlay;
 		report.kindsNow = kindsNow;
 		report.kindsBefore = kindsBefore;
+		report.kindsMoved = kindsMoved;
 		return report;
 	}
 
@@ -151,6 +155,7 @@ public final class Report
 		report.playedMs = day.getPlayedMs();
 		report.timedPlay = day.getPlayedMs() > 0 ? day.getPlay() : 0;
 		report.kindsNow = day.getKinds();
+		report.kindsMoved = day.getMoved();
 		return report;
 	}
 
@@ -200,6 +205,30 @@ public final class Report
 			change[i] = kindsNow[i] - kindsBefore[i];
 		}
 		return change;
+	}
+
+	/**
+	 * What each kind gained or lost over the span from its items coming and going, by {@link Kind} ordinal,
+	 * leaving price moves out: coins that turned into gear show here, a price rise does not. Null when no
+	 * page in the span told kinds apart.
+	 */
+	public long[] kindFlow()
+	{
+		return kindsMoved == null ? null : kindsMoved.clone();
+	}
+
+	private static long[] add(long[] sum, long[] more)
+	{
+		if (more == null)
+		{
+			return sum;
+		}
+		long[] next = sum == null ? new long[more.length] : sum;
+		for (int i = 0; i < more.length; i++)
+		{
+			next[i] += more[i];
+		}
+		return next;
 	}
 
 	private static Report build(LocalDate from, int covered, long end, long play, long market, Map<Integer, Flow> merged, int limit,

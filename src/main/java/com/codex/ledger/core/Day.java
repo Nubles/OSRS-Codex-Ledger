@@ -53,6 +53,8 @@ public final class Day
 	private long ms;
 	/** Worth by kind when the page last settled, by {@link Kind} ordinal; null before kinds were kept. */
 	private long[] kinds;
+	/** Worth each kind gained or lost by its items coming and going, prices held, by {@link Kind} ordinal. */
+	private long[] moved;
 
 	public Day()
 	{
@@ -176,6 +178,27 @@ public final class Day
 	void kinds(long[] byKind)
 	{
 		kinds = byKind;
+	}
+
+	void moved(long[] byKind)
+	{
+		if (moved == null || moved.length != byKind.length)
+		{
+			moved = new long[byKind.length];
+		}
+		for (int i = 0; i < byKind.length; i++)
+		{
+			moved[i] += byKind[i];
+		}
+	}
+
+	/**
+	 * What each kind gained or lost on this day from its items coming and going, never from prices moving,
+	 * or null when it was not told apart.
+	 */
+	public long[] getMoved()
+	{
+		return moved == null || moved.length != Kind.values().length ? null : moved.clone();
 	}
 
 	/** Worth by kind when the day last settled, or null when it was not told apart. */

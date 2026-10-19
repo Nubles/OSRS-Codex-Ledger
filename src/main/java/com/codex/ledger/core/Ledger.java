@@ -299,6 +299,7 @@ public final class Ledger
 		long foundValue = 0;
 		long worth = 0;
 		long[] byKind = kinds == null ? null : new long[Kind.values().length];
+		long[] movedKind = kinds == null ? null : new long[Kind.values().length];
 		for (int id : ids)
 		{
 			long oldQ = before.getOrDefault(id, 0L);
@@ -313,10 +314,13 @@ public final class Ledger
 			long value = (newQ - oldQ) * price;
 			long moved = oldQ * (price - oldPrice);
 			worth += newQ * price;
-			if (byKind != null && newQ > 0)
+			if (byKind != null && (newQ > 0 || value != 0))
 			{
 				Kind kind = id == COINS ? Kind.CASH : kinds.apply(id);
-				byKind[(kind == null ? Kind.MATERIALS : kind).ordinal()] += newQ * price;
+				int k = (kind == null ? Kind.MATERIALS : kind).ordinal();
+				byKind[k] += newQ * price;
+				// Items coming and going at today's price; a price moving is not a kind changing hands.
+				movedKind[k] += value;
 			}
 			foundValue += found.getOrDefault(id, 0L) * oldPrice;
 			play += value;
@@ -361,6 +365,7 @@ public final class Ledger
 			if (byKind != null)
 			{
 				day.kinds(byKind);
+				day.moved(movedKind);
 			}
 			if (changed || history.isEmpty())
 			{

@@ -398,7 +398,7 @@ public class LedgerPanel extends PluginPanel
 		long[] change = report.kindChange();
 		stack.add(new SectionHeader("What it is", change == null ? "" : "change " + when));
 		stack.add(new KindBreakdown(kinds, change));
-		String moved = kindStory(kinds, change);
+		String moved = kindStory(kinds, report.kindFlow());
 		if (moved != null)
 		{
 			stack.add(Ui.wrapped(moved, Theme.small(), Theme.TEXT_FAINT, WIDTH - 10));
@@ -409,14 +409,15 @@ public class LedgerPanel extends PluginPanel
 	 * One plain sentence when coins clearly turned into gear or back, the move a player makes on purpose
 	 * and likes to see named: "About 48.2M in coins went into gear."
 	 */
-	static String kindStory(long[] kinds, long[] change)
+	static String kindStory(long[] kinds, long[] flow)
 	{
-		if (change == null)
+		// Told from items changing hands only: gear rising in price while coins are spent is no purchase.
+		if (kinds == null || flow == null)
 		{
 			return null;
 		}
-		long cash = change[com.codex.ledger.core.Kind.CASH.ordinal()];
-		long gear = change[com.codex.ledger.core.Kind.GEAR.ordinal()];
+		long cash = flow[com.codex.ledger.core.Kind.CASH.ordinal()];
+		long gear = flow[com.codex.ledger.core.Kind.GEAR.ordinal()];
 		long total = 0;
 		for (long v : kinds)
 		{
