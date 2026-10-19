@@ -186,6 +186,10 @@ public final class Format
 					best = i;
 				}
 			}
+			if (best < 0)
+			{
+				break;
+			}
 			points[best]++;
 			lost[best] = -1;
 			given++;

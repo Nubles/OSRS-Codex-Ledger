@@ -1209,7 +1209,7 @@ public class LedgerPanel extends PluginPanel
 		head.highlighted(true);
 		head.add(Ui.label(lines.size() + " kinds of item", Theme.title(), Theme.GOLD_BRIGHT), BorderLayout.NORTH);
 		head.add(Ui.wrapped((lines.size() > 5 ? "Your five most valuable hold " + (topFive == 0 ? "<1" : String.valueOf(topFive)) + "% of your worth."
-			: "That is everything you hold, below.")
+			: "Everything you hold is listed below.")
 			+ (ledger.isReady() ? "" : " Open your bank to count the rest."), Theme.small(), Theme.TEXT_MUTED, WIDTH - 30), BorderLayout.CENTER);
 		stack.add(head);
 

@@ -111,39 +111,72 @@ public final class CardPictures implements ItemIcons
 	 */
 	public static void draw(ItemIcons icons, Function<ItemIcons, BufferedImage> render, Consumer<BufferedImage> deliver)
 	{
+		// A second press while the first card still waits for its pictures is let go, so one press
+		// never becomes two save dialogs.
+		if (!BUSY.compareAndSet(false, true))
+		{
+			return;
+		}
 		draw(icons, render, deliver, SwingUtilities::invokeLater, run ->
 		{
 			Timer timer = new Timer(WAIT_MS, e -> run.run());
 			timer.setRepeats(false);
 			timer.start();
-		});
+		}, () -> BUSY.set(false));
 	}
 
-	/** As {@link #draw(ItemIcons, Function, Consumer)}, with how to get back on the Swing thread and how to wait, for tests. */
+	/** True while a card waits for its pictures. */
+	private static final AtomicBoolean BUSY = new AtomicBoolean();
+
+	/**
+	 * As {@link #draw(ItemIcons, Function, Consumer)}, with how to get back on the Swing thread and how
+	 * to wait, for tests.
+	 *
+	 * @param after runs once the card has been handed over, or failed to draw
+	 */
 	static void draw(ItemIcons icons, Function<ItemIcons, BufferedImage> render, Consumer<BufferedImage> deliver,
-		Consumer<Runnable> onSwing, Consumer<Runnable> afterWait)
+		Consumer<Runnable> onSwing, Consumer<Runnable> afterWait, Runnable after)
 	{
-		if (icons == null)
+		boolean waiting = false;
+		try
 		{
-			deliver.accept(render.apply(null));
-			return;
-		}
-		CardPictures pictures = new CardPictures(icons);
-		BufferedImage first = render.apply(pictures);
-		if (pictures.allArrived())
-		{
-			deliver.accept(first);
-			return;
-		}
-		AtomicBoolean done = new AtomicBoolean();
-		Runnable finish = () -> onSwing.accept(() ->
-		{
-			if (done.compareAndSet(false, true))
+			if (icons == null)
 			{
-				deliver.accept(render.apply(pictures));
+				deliver.accept(render.apply(null));
+				return;
 			}
-		});
-		pictures.whenAllArrived(finish);
-		afterWait.accept(finish);
+			CardPictures pictures = new CardPictures(icons);
+			BufferedImage first = render.apply(pictures);
+			if (pictures.allArrived())
+			{
+				deliver.accept(first);
+				return;
+			}
+			AtomicBoolean done = new AtomicBoolean();
+			Runnable finish = () -> onSwing.accept(() ->
+			{
+				if (done.compareAndSet(false, true))
+				{
+					try
+					{
+						deliver.accept(render.apply(pictures));
+					}
+					finally
+					{
+						after.run();
+					}
+				}
+			});
+			pictures.whenAllArrived(finish);
+			afterWait.accept(finish);
+			waiting = true;
+		}
+		finally
+		{
+			if (!waiting)
+			{
+				after.run();
+			}
+		}
 	}
 }

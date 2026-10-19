@@ -60,10 +60,12 @@ public class CardPicturesTest
 		List<Boolean> drawn = new ArrayList<>();
 		List<BufferedImage> delivered = new ArrayList<>();
 		List<Runnable> waits = new ArrayList<>();
-		CardPictures.draw(late, icons -> card(icons, late, drawn), delivered::add, Runnable::run, waits::add);
+		int[] ended = {0};
+		CardPictures.draw(late, icons -> card(icons, late, drawn), delivered::add, Runnable::run, waits::add, () -> ended[0]++);
 		// Drawn once to learn what it needs, and nothing handed over yet.
 		assertEquals(1, drawn.size());
 		assertTrue(delivered.isEmpty());
+		assertEquals(0, ended[0]);
 		late.callbacks.get(995).run();
 		assertTrue(delivered.isEmpty());
 		late.callbacks.get(4151).run();
@@ -71,9 +73,10 @@ public class CardPicturesTest
 		assertEquals(1, delivered.size());
 		assertEquals(Boolean.TRUE, drawn.get(1));
 		assertEquals(2, late.asked);
-		// The wait running out afterwards hands nothing over a second time.
+		// The wait running out afterwards hands nothing over a second time, and the card ended once.
 		waits.get(0).run();
 		assertEquals(1, delivered.size());
+		assertEquals(1, ended[0]);
 	}
 
 	@Test
@@ -83,7 +86,8 @@ public class CardPicturesTest
 		List<Boolean> drawn = new ArrayList<>();
 		List<BufferedImage> delivered = new ArrayList<>();
 		List<Runnable> waits = new ArrayList<>();
-		CardPictures.draw(late, icons -> card(icons, late, drawn), delivered::add, Runnable::run, waits::add);
+		int[] ended = {0};
+		CardPictures.draw(late, icons -> card(icons, late, drawn), delivered::add, Runnable::run, waits::add, () -> ended[0]++);
 		late.callbacks.get(995).run();
 		waits.get(0).run();
 		assertEquals(1, delivered.size());
@@ -93,17 +97,46 @@ public class CardPicturesTest
 	}
 
 	@Test
+	public void aCardThatFailsToDrawStillLetsTheNextPressThrough()
+	{
+		Late late = new Late();
+		int[] ended = {0};
+		List<Runnable> waits = new ArrayList<>();
+		int[] calls = {0};
+		CardPictures.draw(late, icons ->
+		{
+			icons.icon(995, null);
+			if (calls[0]++ > 0)
+			{
+				throw new IllegalStateException("broken");
+			}
+			return null;
+		}, c -> { }, Runnable::run, waits::add, () -> ended[0]++);
+		try
+		{
+			late.callbacks.get(995).run();
+		}
+		catch (IllegalStateException expected)
+		{
+			// The failure reaches the caller as before.
+		}
+		assertEquals(1, ended[0]);
+	}
+
+	@Test
 	public void picturesAlreadyInAreDrawnAtOnce()
 	{
 		List<BufferedImage> delivered = new ArrayList<>();
+		int[] ended = {0};
 		BufferedImage card = new BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB);
 		ItemIcons ready = (id, cb) -> new BufferedImage(36, 32, BufferedImage.TYPE_INT_ARGB);
 		CardPictures.draw(ready, icons ->
 		{
 			icons.icon(995, null);
 			return card;
-		}, delivered::add, r -> { throw new AssertionError(); }, r -> { });
+		}, delivered::add, r -> { throw new AssertionError(); }, r -> { }, () -> ended[0]++);
 		assertSame(card, delivered.get(0));
+		assertEquals(1, ended[0]);
 		CardPictures.draw(null, icons -> card, delivered::add);
 		assertEquals(2, delivered.size());
 	}
