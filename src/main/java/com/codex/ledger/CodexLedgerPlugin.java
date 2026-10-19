@@ -1,6 +1,8 @@
 package com.codex.ledger;
 
+import com.codex.ledger.core.Alchemy;
 import com.codex.ledger.core.Day;
+import com.codex.ledger.core.Earnings;
 import com.codex.ledger.core.Kind;
 import com.codex.ledger.core.Kinds;
 import com.codex.ledger.core.Ledger;
@@ -16,12 +18,15 @@ import com.codex.ledger.ui.LedgerPanel;
 import com.codex.ledger.ui.Sigil;
 import com.google.gson.Gson;
 import com.google.gson.JsonParseException;
+import com.google.gson.reflect.TypeToken;
 import com.google.inject.Provides;
+import java.lang.reflect.Type;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import javax.inject.Inject;
@@ -82,6 +87,12 @@ public class CodexLedgerPlugin extends Plugin
 	private static final String LEDGER_KEY = "ledger";
 	/** Characters the saved ledger may take before its oldest detail is trimmed; a typical account saves 40-120k. */
 	private static final int SAVE_BUDGET = 200_000;
+	/** Codex Session Chronicle's group and journal key, read and never written, for what pays. */
+	static final String CHRONICLE_GROUP = "codexsessionchronicle";
+	static final String CHRONICLE_JOURNAL = "journal";
+	private static final Type CHRONICLE_TYPE = new TypeToken<List<Earnings.Logged>>()
+	{
+	}.getType();
 	private final Saver saver = new Saver(SAVE_BUDGET);
 	/** Ticks between revaluing what is held, about a minute. */
 	private static final int REVALUE_TICKS = 100;
@@ -145,6 +156,8 @@ public class CodexLedgerPlugin extends Plugin
 	private final Map<Integer, String> names = new HashMap<>();
 	/** What each item is, worked out once on the client thread. */
 	private final Map<Integer, Kind> kinds = new HashMap<>();
+	/** High alchemy values by item id; they never change. */
+	private final Map<Integer, Long> highAlch = new HashMap<>();
 
 	private LedgerPanel panel;
 	private NavigationButton navButton;
@@ -154,6 +167,8 @@ public class CodexLedgerPlugin extends Plugin
 	private boolean dirty;
 	/** The panel was closed when the ledger last changed, so it has not been sent a copy since. */
 	private volatile boolean panelBehind;
+	/** Session Chronicle's filed sessions for this account, or empty without it. */
+	private List<Earnings.Logged> chronicle = Collections.emptyList();
 	private boolean unsaved;
 	/** Time logged in counted since the last save, saved with the next change or at the slower pace. */
 	private boolean playUnsaved;
@@ -221,6 +236,7 @@ public class CodexLedgerPlugin extends Plugin
 			save();
 			ledger = null;
 			profile = null;
+			chronicle = Collections.emptyList();
 			names.clear();
 			synced = false;
 			loggedInTicks = -1;
@@ -305,6 +321,19 @@ public class CodexLedgerPlugin extends Plugin
 	@Subscribe
 	public void onConfigChanged(ConfigChanged event)
 	{
+		if (CHRONICLE_GROUP.equals(event.getGroup()))
+		{
+			// Session Chronicle filed a session: what pays may have moved.
+			if (CHRONICLE_JOURNAL.equals(event.getKey()) && profile != null && profile.equals(event.getProfile()))
+			{
+				clientThread.invokeLater(() ->
+				{
+					readChronicle();
+					publish();
+				});
+			}
+			return;
+		}
 		// The ledger itself is saved in this group too, every few minutes; only the settings matter here.
 		if (CodexLedgerConfig.GROUP.equals(event.getGroup()) && event.getProfile() == null)
 		{
@@ -558,6 +587,7 @@ public class CodexLedgerPlugin extends Plugin
 	{
 		profile = configManager.getRSProfileKey();
 		ledger = null;
+		chronicle = Collections.emptyList();
 		if (profile == null)
 		{
 			return;
@@ -581,6 +611,7 @@ public class CodexLedgerPlugin extends Plugin
 		}
 		ledger.setKinds(this::kind);
 		saver.reset();
+		readChronicle();
 		unsaved = false;
 		playUnsaved = false;
 		dirty = true;
@@ -681,6 +712,17 @@ public class CodexLedgerPlugin extends Plugin
 				name(id);
 			}
 		}
+		// Ironmen cannot sell, so "better alched than sold" means nothing to them.
+		Alchemy alchemy = client.getVarbitValue(VarbitID.IRONMAN) > 0 ? null
+			: Alchemy.of(copy.holdings(), copy::price, this::highAlch);
+		if (alchemy != null)
+		{
+			for (Alchemy.Line line : alchemy.getLines())
+			{
+				name(line.getItemId());
+			}
+		}
+		Earnings earnings = chronicle.isEmpty() ? null : Earnings.of(chronicle, now);
 		Map<Integer, String> shownNames = new HashMap<>(names);
 		Player player = client.getLocalPlayer();
 		String name = loggedIn && player != null ? player.getName() : null;
@@ -689,8 +731,44 @@ public class CodexLedgerPlugin extends Plugin
 		SwingUtilities.invokeLater(() ->
 		{
 			target.setGoal(goal);
+			target.setAlchemy(alchemy);
+			target.setEarnings(earnings);
 			target.update(copy, shownNames, name, state, now);
 		});
+	}
+
+	/** Reads Codex Session Chronicle's filed sessions for this account; never writes them. Empty when it is not installed. */
+	private void readChronicle()
+	{
+		chronicle = Collections.emptyList();
+		String json = configManager.getRSProfileConfiguration(CHRONICLE_GROUP, CHRONICLE_JOURNAL);
+		if (json == null || json.isEmpty())
+		{
+			return;
+		}
+		try
+		{
+			List<Earnings.Logged> read = gson.fromJson(json, CHRONICLE_TYPE);
+			chronicle = read == null ? Collections.emptyList() : read;
+		}
+		catch (RuntimeException e)
+		{
+			// Another plugin's format may change under us; without it there is simply no "what pays".
+			log.debug("Could not read Codex Session Chronicle's journal", e);
+		}
+	}
+
+	/** An item's high alchemy value, asked on the client thread and kept; 0 for an item that cannot be alched. */
+	private long highAlch(int itemId)
+	{
+		Long known = highAlch.get(itemId);
+		if (known == null)
+		{
+			ItemComposition item = itemManager.getItemComposition(itemId);
+			known = item == null ? 0L : (long) Math.max(0, item.getHaPrice());
+			highAlch.put(itemId, known);
+		}
+		return known;
 	}
 
 	/** What an item is: coins, gear, supplies or materials. Asked on the client thread while settling. */

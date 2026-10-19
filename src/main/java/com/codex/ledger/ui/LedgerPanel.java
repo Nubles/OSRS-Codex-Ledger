@@ -1,8 +1,10 @@
 package com.codex.ledger.ui;
 
+import com.codex.ledger.core.Alchemy;
 import com.codex.ledger.core.Channel;
 import com.codex.ledger.core.Day;
 import com.codex.ledger.core.Deal;
+import com.codex.ledger.core.Earnings;
 import com.codex.ledger.core.Forecast;
 import com.codex.ledger.core.Ledger;
 import com.codex.ledger.core.Offer;
@@ -157,6 +159,8 @@ public class LedgerPanel extends PluginPanel
 		return scroll;
 	}
 
+	private Alchemy alchemy;
+	private Earnings earnings;
 	/** Asks for a fresh copy of the ledger when the panel opens; null in previews. */
 	private Runnable onOpen;
 
@@ -182,6 +186,18 @@ public class LedgerPanel extends PluginPanel
 			// Nobody is looking; the tab on show is rebuilt when the panel is opened.
 			java.util.Arrays.fill(stale, true);
 		}
+	}
+
+	/** What is better alched than sold, or null to say nothing (ironmen, who cannot sell); shown at the next rebuild. */
+	public void setAlchemy(Alchemy alchemy)
+	{
+		this.alchemy = alchemy;
+	}
+
+	/** What pays by activity, from Codex Session Chronicle's sessions, or null without it; shown at the next rebuild. */
+	public void setEarnings(Earnings earnings)
+	{
+		this.earnings = earnings;
 	}
 
 	/** The worth goal from the settings; shown at the next rebuild. */
@@ -375,6 +391,7 @@ public class LedgerPanel extends PluginPanel
 			stack.add(tiles);
 			goal(stack);
 			kinds(stack, report, "today");
+			pays(stack);
 			whereKept(stack);
 			replace(worth, stack);
 			return;
@@ -386,6 +403,7 @@ public class LedgerPanel extends PluginPanel
 		stack.add(tiles);
 		goal(stack);
 		kinds(stack, report, RANGE_NOTES[r]);
+		pays(stack);
 		whereKept(stack);
 		replace(worth, stack);
 	}
@@ -493,6 +511,37 @@ public class LedgerPanel extends PluginPanel
 			return left + "At " + pace + " it is more than ten years off.";
 		}
 		return left + "At " + pace + ", around " + Format.longDay(f.getEta()) + ".";
+	}
+
+	/** Net worth an hour by what the play was spent on, from Session Chronicle's sessions. */
+	private void pays(StackPanel stack)
+	{
+		Earnings e = earnings;
+		if (e == null || e.isEmpty())
+		{
+			return;
+		}
+		stack.add(new SectionHeader("What pays", e.getDays() == 1 ? "last day" : "last " + e.getDays() + " days"));
+		List<Earnings.Line> lines = e.getLines();
+		for (int i = 0; i < lines.size() && i < Earnings.SHOWN; i++)
+		{
+			Earnings.Line l = lines.get(i);
+			Card row = new Card(new BorderLayout(6, 1));
+			row.setBorder(new EmptyBorder(5, 10, 5, 10));
+			row.accent(Theme.signed(l.perHour()));
+			JLabel name = Ui.label(l.getName(), Theme.body(), Theme.TEXT);
+			name.setMinimumSize(new Dimension(10, 10));
+			name.setPreferredSize(new Dimension(10, name.getPreferredSize().height));
+			row.add(name, BorderLayout.CENTER);
+			row.add(Ui.label(Format.signed(l.perHour()) + "/hr", Theme.body(), Theme.signed(l.perHour())), BorderLayout.EAST);
+			row.add(Ui.label(Format.plural(l.getSessions(), "session") + ", " + Format.duration(l.getPlayedMs()) + ", "
+				+ Format.signed(l.getChange()), Theme.small(), Theme.TEXT_FAINT), BorderLayout.SOUTH);
+			row.setToolTipText(l.getName() + ": " + Format.signed(l.getChange()) + " over " + Format.plural(l.getSessions(), "session")
+				+ " and " + Format.duration(l.getPlayedMs()) + " of play, " + Format.signed(l.perHour()) + " an hour.");
+			stack.add(row);
+		}
+		stack.add(Ui.wrapped("Net worth an hour played, by what Codex Session Chronicle saw each session spent on: loot, supplies used,"
+			+ " deaths and prices all count.", Theme.small(), Theme.TEXT_FAINT, WIDTH - 10));
 	}
 
 	private void whereKept(StackPanel stack)
@@ -984,6 +1033,7 @@ public class LedgerPanel extends PluginPanel
 			}
 			stack.add(Ui.label("and " + (lines.size() - HOARD) + " more, worth " + Format.coins(rest), Theme.small(), Theme.TEXT_FAINT));
 		}
+		alchemy(stack);
 		List<String> untradeable = new ArrayList<>();
 		for (Map.Entry<Integer, Long> e : ledger.holdings().entrySet())
 		{
@@ -1001,6 +1051,45 @@ public class LedgerPanel extends PluginPanel
 				+ " no Grand Exchange price and count as nothing: " + shown + ".", Theme.small(), Theme.TEXT_FAINT, WIDTH - 10));
 		}
 		replace(hoard, stack);
+	}
+
+	/** Casts of High Level Alchemy an hour, five ticks each. */
+	static final int CASTS_AN_HOUR = 1_200;
+	/** Magic experience a cast of High Level Alchemy gives. */
+	static final int CAST_XP = 65;
+
+	/** Items worth more alched than sold, with what alching them all makes over selling. */
+	private void alchemy(StackPanel stack)
+	{
+		Alchemy a = alchemy;
+		if (a == null || a.isEmpty())
+		{
+			return;
+		}
+		stack.add(new SectionHeader("Better alched", Format.signed(a.getGain())));
+		long minutes = Math.max(1, Math.round(a.getCasts() * 60.0 / CASTS_AN_HOUR));
+		String time = minutes < 60 ? minutes + " minutes" : String.format("%.1f hours", minutes / 60.0);
+		stack.add(Ui.wrapped("High Level Alchemy beats selling these by " + Format.coins(a.getGain()) + ", after nature runes and the "
+			+ "exchange's tax: " + String.format("%,d", a.getCasts()) + " casts, about " + time + " and "
+			+ Format.compact(a.getCasts() * CAST_XP) + " Magic xp.", Theme.small(), Theme.TEXT_MUTED, WIDTH - 10));
+		JPanel list = new JPanel(new GridLayout(0, 1, 0, 2));
+		list.setOpaque(false);
+		List<Alchemy.Line> lines = a.getLines();
+		long top = Math.max(1, lines.get(0).gain());
+		for (int i = 0; i < lines.size() && i < Alchemy.SHOWN; i++)
+		{
+			Alchemy.Line l = lines.get(i);
+			String name = name(l.getItemId());
+			String note = String.format("%,d x %s more", l.getQuantity(), Format.coins(l.getAlch() - l.getSale()));
+			list.add(new ItemRow(l.getItemId(), name, note, Format.signed(l.gain()), Theme.TEAL, l.gain() / (double) top, icons,
+				name + ": alched for " + Format.coins(l.getAlch()) + " each after a nature rune, against "
+					+ Format.coins(l.getSale()) + " each sold after tax."));
+		}
+		stack.add(list);
+		if (lines.size() > Alchemy.SHOWN)
+		{
+			stack.add(Ui.label("and " + (lines.size() - Alchemy.SHOWN) + " more", Theme.small(), Theme.TEXT_FAINT));
+		}
 	}
 
 	/** "Bank 2, worn 1", where an item is kept. */
