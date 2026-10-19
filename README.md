@@ -38,7 +38,7 @@ It is the sixth plugin in the **Codex** suite, after [Codex Navigator](https://g
   <img src="docs/screenshots/ledger-card.png" width="360" alt="The ledger card">
 </p>
 
-Figures are written one way throughout: millions and thousands always carry one decimal ("26.0M", "412.3k"), billions three below 10B ("1.504B"), and round figures go by their names ("Passed 1B"). Shares listed together are rounded together, so they never add up past 100%.
+Figures are written one way throughout, the same as in Gear Roadmap and Session Chronicle: thousands whole ("412k"), millions with one decimal ("26.0M") and billions with two ("1.50B"), and round figures go by their names ("Passed 1B"). Shares listed together are rounded together, so they never add up past 100%.
 
 ## How it counts
 

@@ -20,8 +20,9 @@ public final class Format
 	}
 
 	/**
-	 * Coins at one precision per unit, so figures side by side read alike: "8,240", "41.2k", "412.3k",
-	 * "4.9M", "26.0M", "835.5M", "1.504B". A zero after the point is kept ("26.0M", not "26M").
+	 * Coins at one precision per unit, the same across the Codex plugins, so figures side by side read
+	 * alike: "8,240", "41k", "412k", "4.9M", "26.0M", "835.5M", "1.50B". Thousands are whole, millions
+	 * keep one decimal and billions two, zero or not ("26.0M", never "26M").
 	 */
 	public static String amount(long n)
 	{
@@ -29,18 +30,14 @@ public final class Format
 		{
 			return String.format(Locale.ENGLISH, "%,d", n);
 		}
-		// A figure that rounds up to a thousand of one unit is written in the next ("1.0M", not "1000.0k").
-		if (n < 999_950)
+		// A figure that rounds up to a thousand of one unit is written in the next ("1.0M", not "1000k").
+		if (n < 999_500)
 		{
-			return fixed(n / 1_000.0, 1) + "k";
+			return Math.round(n / 1_000.0) + "k";
 		}
 		if (n < 999_950_000)
 		{
 			return fixed(n / 1_000_000.0, 1) + "M";
-		}
-		if (n < 9_999_500_000L)
-		{
-			return fixed(n / 1_000_000_000.0, 3) + "B";
 		}
 		return fixed(n / 1_000_000_000.0, 2) + "B";
 	}
@@ -55,39 +52,27 @@ public final class Format
 		{
 			return String.format(Locale.ENGLISH, "%,d", n);
 		}
-		if (n < 1_000_000)
+		if (n < 999_500)
 		{
-			return trim(n / 1_000.0, 1) + "k";
+			return Math.round(n / 1_000.0) + "k";
 		}
-		if (n < 1_000_000_000)
+		if (n < 999_995_000)
 		{
 			return trim(n / 1_000_000.0, 2) + "M";
 		}
-		return trim(n / 1_000_000_000.0, 3) + "B";
+		return trim(n / 1_000_000_000.0, 2) + "B";
 	}
 
-	/** Three figures always, for tight columns: "8,240", "41.2k", "412k", "4.90M", "26.0M", "628M", "1.53B". */
+	/**
+	 * For tight columns; the same as {@link #amount}, which is never wider than "999.9M", so a column
+	 * reads with the same places as the rest of the panel ("+4.9M", not "+4.90M" beside it).
+	 */
 	public static String compact(long n)
 	{
-		if (n < 10_000)
-		{
-			return String.format(Locale.ENGLISH, "%,d", n);
-		}
-		String[] units = {"k", "M", "B"};
-		double v = n / 1_000.0;
-		for (int u = 0; ; u++)
-		{
-			int places = v < 9.995 ? 2 : v < 99.95 ? 1 : 0;
-			// Past the last unit, or still under a thousand once rounded: write it in this unit.
-			if (u == units.length - 1 || Math.round(v) < 1000)
-			{
-				return fixed(v, places) + units[u];
-			}
-			v /= 1_000.0;
-		}
+		return amount(n);
 	}
 
-	/** A change with its sign, in at most three figures: "+628M". */
+	/** A change with its sign, for tight columns: "+628.1M". */
 	public static String signedCompact(long gp)
 	{
 		return gp > 0 ? "+" + compact(gp) : gp < 0 ? "-" + compact(-gp) : "0";

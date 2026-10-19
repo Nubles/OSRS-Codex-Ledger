@@ -29,7 +29,7 @@ public class LocaleFormatTest
 	{
 		assertEquals("1.5 hours", Format.hours(1.5));
 		assertEquals("12,480", Format.whole(12_480));
-		assertEquals("41.2k", Format.coins(41_200));
+		assertEquals("41.2M", Format.coins(41_200_000));
 		assertEquals("+1,240", Format.count(1_240));
 	}
 

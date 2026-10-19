@@ -8,19 +8,20 @@ import org.junit.Test;
 public class FormatTest
 {
 	@Test
-	public void compactKeepsToThreeFigures()
+	public void columnsUseTheSameRuleAsEverywhereElse()
 	{
-		assertEquals("+628M", Format.signedCompact(628_140_000L));
-		assertEquals("-41.2k", Format.signedCompact(-41_249));
+		// The crest once read "+4.90M" over a page reading "+4.9M".
+		assertEquals("+628.1M", Format.signedCompact(628_140_000L));
+		assertEquals("-41k", Format.signedCompact(-41_249));
 		assertEquals("1.53B", Format.compact(1_534_000_000L));
 		assertEquals("8,240", Format.compact(8_240));
-		assertEquals("12.4M", Format.compact(12_400_000));
+		assertEquals(Format.signed(4_900_000), Format.signedCompact(4_900_000));
 	}
 
 	@Test
-	public void billionsCarryAnotherFigure()
+	public void billionsCarryTwoPlaces()
 	{
-		assertEquals("1.504B", Format.coins(1_504_200_000L));
+		assertEquals("1.50B", Format.coins(1_504_200_000L));
 		assertEquals("676.9M", Format.coins(676_900_000L));
 		assertEquals("12.40B", Format.coins(12_400_000_000L));
 	}
@@ -33,19 +34,17 @@ public class FormatTest
 		assertEquals("+26.0M", Format.signed(26_000_000));
 		assertEquals("+98.7M", Format.signed(98_700_000));
 		assertEquals("+3.2M", Format.signed(3_150_001));
-		assertEquals("41.0k", Format.coins(41_000));
-		assertEquals("412.3k", Format.coins(412_300));
+		// Thousands are whole, as in Gear Roadmap and Session Chronicle.
+		assertEquals("41k", Format.coins(41_000));
+		assertEquals("60k", Format.coins(60_000));
+		assertEquals("300k", Format.coins(300_000));
+		assertEquals("412k", Format.coins(412_300));
+		assertEquals("10k", Format.coins(10_000));
 		assertEquals("8,240", Format.coins(8_240));
 		// Rounding up to a thousand writes the next unit.
-		assertEquals("1.0M", Format.coins(999_960));
-		assertEquals("1.000B", Format.coins(999_960_000L));
-		assertEquals("999.9k", Format.coins(999_949));
-		// Three figures in tight columns, zeros kept.
-		assertEquals("4.90M", Format.compact(4_900_000));
-		assertEquals("26.0M", Format.compact(26_000_000));
-		assertEquals("100k", Format.compact(99_960));
-		assertEquals("1.00M", Format.compact(999_999));
-		assertEquals("10.0k", Format.compact(10_000));
+		assertEquals("1.0M", Format.coins(999_500));
+		assertEquals("999k", Format.coins(999_499));
+		assertEquals("1.00B", Format.coins(999_960_000L));
 	}
 
 	@Test
@@ -55,7 +54,9 @@ public class FormatTest
 		assertEquals("1.5B", Format.mark(1_500_000_000L));
 		assertEquals("750M", Format.mark(750_000_000L));
 		assertEquals("10M", Format.mark(10_000_000L));
-		assertEquals("1.235B", Format.mark(1_234_567_890L));
+		assertEquals("1.23B", Format.mark(1_234_567_890L));
+		assertEquals("300k", Format.mark(300_000L));
+		assertEquals("2.25M", Format.mark(2_250_000L));
 	}
 
 	@Test
