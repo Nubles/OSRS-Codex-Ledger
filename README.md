@@ -37,7 +37,7 @@ Changes are settled once a game tick, so moving items between the bank, your inv
 
 **Trades** are read from each offer's progress, so an offer placed or filled on the mobile app is counted when the client next sees it. An offer that was both finished and collected while you were away leaves only an empty slot, so what it did after the client last saw it can't be counted.
 
-**Deaths** are noticed when your character dies: what leaves your account in the next half minute is booked to the death, and getting the same items back in the hours after (from the gravestone or Death) is set against it.
+**Deaths** are noticed when your character dies: what leaves your account when you are sent home is booked to the death, and getting the same items back in the hour after (from the gravestone or Death) is set against it.
 
 A looting bag that is no longer in your inventory or bank (lost in the wilderness) is counted empty. After logging in, nothing is counted for a couple of ticks, until the offers and rune pouch have arrived alongside the inventory.
 

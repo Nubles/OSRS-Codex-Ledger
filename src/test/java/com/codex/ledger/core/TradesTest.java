@@ -212,6 +212,15 @@ public class TradesTest
 		settle();
 		assertEquals(-2_400, today().channel(Channel.USED));
 		assertEquals(today().getPlay(), channels(today()));
+
+		// Long after, sharks gained are loot again.
+		ledger.died(now);
+		ledger.observe(Store.INVENTORY, items());
+		settle();
+		now += Ledger.REGAIN_MS + 1;
+		ledger.observe(Store.INVENTORY, items(SHARK, 12));
+		settle();
+		assertEquals(4_000 + 12 * 800, today().channel(Channel.LOOT));
 	}
 
 	@Test

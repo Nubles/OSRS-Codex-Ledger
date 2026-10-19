@@ -43,7 +43,7 @@ public final class Ledger
 	/** Pages whose deals by item are kept: the Trades page reaches back 30 days, older pages keep their day's totals. */
 	static final int DEAL_DAYS = 30;
 	/** How long after dying getting the same items back counts against that death. */
-	static final long REGAIN_MS = 6 * 3_600_000L;
+	static final long REGAIN_MS = 3_600_000L;
 
 	private Map<Store, Holding> stores = new LinkedHashMap<>();
 	private Map<Integer, Long> prices = new HashMap<>();
@@ -187,7 +187,7 @@ public final class Ledger
 
 	/**
 	 * The player died: what leaves the account in the next moments is lost to the death, and what
-	 * comes back from the gravestone or Death in the hours after is set against it.
+	 * comes back from the gravestone or Death in the hour after is set against it.
 	 */
 	public void died(long now)
 	{
