@@ -75,6 +75,8 @@ public class CodexLedgerPlugin extends Plugin
 {
 	private static final Logger log = LoggerFactory.getLogger(CodexLedgerPlugin.class);
 	private static final String LEDGER_KEY = "ledger";
+	/** Characters the saved ledger may take before its oldest detail is trimmed; a typical account saves 40-120k. */
+	private static final int SAVE_BUDGET = 200_000;
 	/** Ticks between revaluing what is held, about a minute. */
 	private static final int REVALUE_TICKS = 100;
 	/**
@@ -557,7 +559,14 @@ public class CodexLedgerPlugin extends Plugin
 			return false;
 		}
 		unsaved = false;
-		configManager.setConfiguration(CodexLedgerConfig.GROUP, profile, LEDGER_KEY, gson.toJson(ledger));
+		String json = gson.toJson(ledger);
+		if (json.length() > SAVE_BUDGET)
+		{
+			// A very busy account: give up the oldest detail rather than let the profile grow.
+			ledger.fit(SAVE_BUDGET, l -> gson.toJson(l).length());
+			json = gson.toJson(ledger);
+		}
+		configManager.setConfiguration(CodexLedgerConfig.GROUP, profile, LEDGER_KEY, json);
 		return true;
 	}
 

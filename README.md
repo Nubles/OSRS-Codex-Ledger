@@ -43,7 +43,7 @@ A looting bag that is no longer in your inventory or bank (lost in the wildernes
 
 Things the game does not show, such as your POH storage, STASH units, item sacks and the gravestone, are not counted: putting items there shows as gold going out, and taking them back as gold coming in.
 
-The history keeps fine detail for the last two days, a point every three hours for six weeks and a point a day beyond that, and the day book keeps 120 days, so the whole ledger stays small. It is saved per account in your RuneLite profile, every few minutes and whenever you log out.
+The history keeps fine detail for the last two days, a point every three hours for six weeks and a point a day beyond that, and the day book keeps 120 days (pages older than a month keep their totals and their six biggest items), so the whole ledger stays small. On a very busy account the oldest detail is trimmed further so the save never passes about 200 KB; what you hold, each day's totals and the worth curve are always kept. It is saved per account in your RuneLite profile, every few minutes and whenever you log out.
 
 ## Rules posture
 

@@ -14,8 +14,10 @@ public final class Day
 {
 	/** Items kept on a page once its day is over. */
 	static final int KEPT_ITEMS = 16;
+	/** Items kept on a page older than the Trades page reaches, where only the biggest movers matter. */
+	static final int OLD_ITEMS = 6;
 	/** Items a page may hold while its day is still being written. */
-	static final int OPEN_ITEMS = 600;
+	static final int OPEN_ITEMS = 300;
 	/** Items traded on the exchange kept on a page once its day is over; the day's trade totals stay whole. */
 	static final int KEPT_DEALS = 24;
 

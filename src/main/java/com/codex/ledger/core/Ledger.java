@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.ToIntFunction;
 
 /**
  * An account's ledger: what it holds in each place, what each item was last worth, the worth
@@ -492,16 +493,7 @@ public final class Ledger
 		{
 			e.getValue().holdAtMost(held.getOrDefault(e.getKey(), 0L));
 		}
-		if (book.size() > BOOK)
-		{
-			List<Map.Entry<Integer, Position>> old = new ArrayList<>(book.entrySet());
-			old.sort(Comparator.comparing((Map.Entry<Integer, Position> e) -> e.getValue().getHeld() > 0)
-				.thenComparingLong(e -> e.getValue().getTime()));
-			for (int i = 0; i < old.size() - BOOK; i++)
-			{
-				book.remove(old.get(i).getKey());
-			}
-		}
+		trimBook(BOOK);
 		boolean traded = !fills.isEmpty();
 		fills.clear();
 		return traded;
@@ -593,7 +585,9 @@ public final class Ledger
 		days.add(day);
 		if (days.size() > DEAL_DAYS)
 		{
-			days.get(days.size() - 1 - DEAL_DAYS).trimDeals(0);
+			Day old = days.get(days.size() - 1 - DEAL_DAYS);
+			old.trimDeals(0);
+			old.trim(Day.OLD_ITEMS);
 		}
 		while (days.size() > DAYS)
 		{
@@ -706,6 +700,110 @@ public final class Ledger
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * Trims the ledger until its saved form fits the budget, giving up the least useful detail first:
+	 * items on old pages, then deals on recent ones, then trades of items long gone, then fine worth
+	 * history. What is held, the day totals and the worth curve's shape are never given up, so a
+	 * ledger whose holdings alone pass the budget stays over it.
+	 *
+	 * @param size the saved size of the ledger as it stands, in characters
+	 * @return the saved size after trimming
+	 */
+	public int fit(int budget, ToIntFunction<Ledger> size)
+	{
+		int now = size.applyAsInt(this);
+		for (int step = 0; now > budget && step < SHRINK_STEPS; step++)
+		{
+			if (shrink(step))
+			{
+				now = size.applyAsInt(this);
+			}
+		}
+		return now;
+	}
+
+	private static final int SHRINK_STEPS = 6;
+
+	/** One step of trimming; true when it took anything away. */
+	private boolean shrink(int step)
+	{
+		int before = detail();
+		int closed = days.size() - 1;
+		switch (step)
+		{
+			case 0:
+				// Pages before the Trades page's reach keep their totals and nothing by item.
+				for (int i = 0; i < closed - 7; i++)
+				{
+					days.get(i).trim(0);
+					days.get(i).trimDeals(0);
+				}
+				break;
+			case 1:
+				for (int i = Math.max(0, closed - 7); i < closed; i++)
+				{
+					days.get(i).trim(Day.OLD_ITEMS);
+					days.get(i).trimDeals(Day.KEPT_DEALS / 3);
+				}
+				break;
+			case 2:
+				trimBook(BOOK / 3);
+				break;
+			case 3:
+				if (closed >= 0)
+				{
+					days.get(closed).trim(Day.KEPT_ITEMS * 2);
+				}
+				break;
+			case 4:
+				// Every other point of the worth history, keeping its first and newest.
+				List<Point> thinned = new ArrayList<>();
+				for (int i = 0; i < history.size(); i++)
+				{
+					if (i % 2 == 0 || i == history.size() - 1)
+					{
+						thinned.add(history.get(i));
+					}
+				}
+				history = thinned;
+				break;
+			default:
+				while (days.size() > DEAL_DAYS)
+				{
+					days.remove(0);
+				}
+				break;
+		}
+		return detail() != before;
+	}
+
+	/** A rough count of the trimmable detail, to tell whether a step took anything. */
+	private int detail()
+	{
+		int n = history.size() + book.size() + days.size();
+		for (Day d : days)
+		{
+			n += d.getItems().size() + d.getDeals().size();
+		}
+		return n;
+	}
+
+	/** Keeps the trades of at most so many items: those still held first, then the most recently traded. */
+	private void trimBook(int keep)
+	{
+		if (book.size() <= keep)
+		{
+			return;
+		}
+		List<Map.Entry<Integer, Position>> old = new ArrayList<>(book.entrySet());
+		old.sort(Comparator.comparing((Map.Entry<Integer, Position> e) -> e.getValue().getHeld() > 0)
+			.thenComparingLong(e -> e.getValue().getTime()));
+		for (int i = 0; i < old.size() - keep; i++)
+		{
+			book.remove(old.get(i).getKey());
+		}
 	}
 
 	/** Mends a ledger read back from storage, where any part may be missing. */
