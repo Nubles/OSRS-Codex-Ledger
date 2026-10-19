@@ -1,6 +1,7 @@
 package com.codex.ledger.ui;
 
 import com.codex.ledger.core.Alchemy;
+import com.codex.ledger.core.BankCopy;
 import com.codex.ledger.core.Channel;
 import com.codex.ledger.core.Day;
 import com.codex.ledger.core.Deal;
@@ -161,6 +162,8 @@ public class LedgerPanel extends PluginPanel
 
 	private Alchemy alchemy;
 	private Earnings earnings;
+	/** Codex Bank Steward's copy of the bank, priced, while the ledger waits for the real one; null otherwise. */
+	private BankCopy.Estimate estimate;
 	/** Asks for a fresh copy of the ledger when the panel opens; null in previews. */
 	private Runnable onOpen;
 
@@ -192,6 +195,18 @@ public class LedgerPanel extends PluginPanel
 	public void setAlchemy(Alchemy alchemy)
 	{
 		this.alchemy = alchemy;
+	}
+
+	/** An estimate from Bank Steward's copy of the bank, or null; shown with the next update while the ledger waits for the bank. */
+	public void setEstimate(BankCopy.Estimate estimate)
+	{
+		this.estimate = estimate;
+	}
+
+	/** The estimate, only while the ledger is waiting to see the bank. */
+	private BankCopy.Estimate estimating()
+	{
+		return ledger != null && !ledger.isReady() && state == State.WAITING_FOR_BANK ? estimate : null;
 	}
 
 	/** What pays by activity, from Codex Session Chronicle's sessions, or null without it; shown at the next rebuild. */
@@ -271,6 +286,12 @@ public class LedgerPanel extends PluginPanel
 			crest.update(player, null, "Log in to open the ledger", null);
 			return;
 		}
+		BankCopy.Estimate e = estimating();
+		if (e != null)
+		{
+			crest.update(player, ledger.getTotal() + e.getBank(), "Estimate: open your bank", null);
+			return;
+		}
 		if (state != State.READY)
 		{
 			crest.update(player, ledger.getTotal(), state == State.LOGGED_OUT ? "Logged out, as last seen" : "Open your bank to begin", null);
@@ -322,7 +343,9 @@ public class LedgerPanel extends PluginPanel
 		}
 		if (!ledger.isReady())
 		{
-			stack.add(note("Open your bank once", "The ledger begins the first time it sees your bank. After that it keeps count on its own, and the bank is remembered as last seen whenever it is closed."));
+			BankCopy.Estimate e = estimating();
+			stack.add(note("Open your bank once", "The ledger begins the first time it sees your bank. After that it keeps count on its own, and the bank is remembered as last seen whenever it is closed."
+				+ (e == null ? "" : " Until then the worth above is an estimate, with Codex Bank Steward's copy of your bank at today's prices.")));
 			return true;
 		}
 		return false;
@@ -340,6 +363,15 @@ public class LedgerPanel extends PluginPanel
 			{
 				stack.add(new SectionHeader("Counted so far", Format.coins(ledger.getTotal())));
 				stack.add(new StoreBreakdown(parts()));
+				BankCopy.Estimate e = estimating();
+				if (e != null)
+				{
+					stack.add(new SectionHeader("Bank Steward's copy", Format.coins(e.getBank())));
+					String seen = e.getSavedAt() > 0 ? "Your bank as Bank Steward last saw it, " + Format.ago(now - e.getSavedAt()) : "Your bank as Bank Steward last saw it";
+					stack.add(Ui.wrapped(seen + ": " + Format.plural(e.getKinds(), "kind") + " of item."
+						+ (e.isTruncated() ? " A bank this large is only partly copied, so the estimate runs low." : "")
+						+ " Nothing in it is booked: the ledger starts from your real bank.", Theme.small(), Theme.TEXT_MUTED, WIDTH - 10));
+				}
 			}
 			replace(worth, stack);
 			return;

@@ -1,6 +1,7 @@
 package com.codex.ledger;
 
 import com.codex.ledger.core.Alchemy;
+import com.codex.ledger.core.BankCopy;
 import com.codex.ledger.core.Day;
 import com.codex.ledger.core.Earnings;
 import com.codex.ledger.core.Kind;
@@ -172,6 +173,11 @@ public class CodexLedgerPlugin extends Plugin
 	private volatile boolean panelBehind;
 	/** Session Chronicle's filed sessions for this account, or empty without it. */
 	private List<Earnings.Logged> chronicle = Collections.emptyList();
+	/** Codex Bank Steward's copy of the bank for this account, read while the ledger waits for the real one; null without it. */
+	private BankCopy bankCopy;
+	/** The copy priced, and the tick it was priced at; priced again about once a minute while waiting. */
+	private BankCopy.Estimate estimate;
+	private int estimatedAt;
 	private boolean unsaved;
 	/** Time logged in counted since the last save, saved with the next change or at the slower pace. */
 	private boolean playUnsaved;
@@ -225,6 +231,11 @@ public class CodexLedgerPlugin extends Plugin
 				loggedInTicks = SYNC_TICKS;
 				observeAll();
 			}
+			else
+			{
+				// Turned on at the login screen, whose event has already gone by: the next login still gets its summary.
+				fromLoginScreen = true;
+			}
 			publish();
 		});
 	}
@@ -240,6 +251,8 @@ public class CodexLedgerPlugin extends Plugin
 			ledger = null;
 			profile = null;
 			chronicle = Collections.emptyList();
+			bankCopy = null;
+			estimate = null;
 			magicLevel = 0;
 			names.clear();
 			synced = false;
@@ -333,6 +346,19 @@ public class CodexLedgerPlugin extends Plugin
 				clientThread.invokeLater(() ->
 				{
 					readChronicle();
+					publish();
+				});
+			}
+			return;
+		}
+		if (BankCopy.GROUP.equals(event.getGroup()))
+		{
+			// Bank Steward saw the bank: the estimate shown before the ledger begins may have moved.
+			if (BankCopy.KEY.equals(event.getKey()) && profile != null && profile.equals(event.getProfile()))
+			{
+				clientThread.invokeLater(() ->
+				{
+					readBankCopy();
 					publish();
 				});
 			}
@@ -592,6 +618,8 @@ public class CodexLedgerPlugin extends Plugin
 		profile = configManager.getRSProfileKey();
 		ledger = null;
 		chronicle = Collections.emptyList();
+		bankCopy = null;
+		estimate = null;
 		magicLevel = 0;
 		if (profile == null)
 		{
@@ -617,6 +645,7 @@ public class CodexLedgerPlugin extends Plugin
 		ledger.setKinds(this::kind);
 		saver.reset();
 		readChronicle();
+		readBankCopy();
 		unsaved = false;
 		playUnsaved = false;
 		dirty = true;
@@ -733,6 +762,7 @@ public class CodexLedgerPlugin extends Plugin
 			}
 		}
 		Earnings earnings = chronicle.isEmpty() ? null : Earnings.of(chronicle, now);
+		BankCopy.Estimate guess = copy.isReady() ? null : estimate();
 		Map<Integer, String> shownNames = new HashMap<>(names);
 		Player player = client.getLocalPlayer();
 		String name = loggedIn && player != null ? player.getName() : null;
@@ -743,8 +773,44 @@ public class CodexLedgerPlugin extends Plugin
 			target.setGoal(goal);
 			target.setAlchemy(alchemy);
 			target.setEarnings(earnings);
+			target.setEstimate(guess);
 			target.update(copy, shownNames, name, state, now);
 		});
+	}
+
+	/** Reads Codex Bank Steward's copy of the bank for this account; never writes it. Null when it is not installed. */
+	private void readBankCopy()
+	{
+		estimate = null;
+		bankCopy = null;
+		if (ledger != null && ledger.isReady())
+		{
+			// The ledger has its own bank: the copy would only ever be a worse guess.
+			return;
+		}
+		try
+		{
+			bankCopy = BankCopy.read(gson, configManager.getRSProfileConfiguration(BankCopy.GROUP, BankCopy.KEY));
+		}
+		catch (RuntimeException e)
+		{
+			log.debug("Could not read Codex Bank Steward's bank", e);
+		}
+	}
+
+	/** The copy priced at today's prices, kept for about a minute; null without a copy or before prices load. */
+	private BankCopy.Estimate estimate()
+	{
+		if (bankCopy == null || !pricesReady())
+		{
+			return null;
+		}
+		if (estimate == null || ticks - estimatedAt >= REVALUE_TICKS)
+		{
+			estimate = bankCopy.estimate(itemManager::getItemPrice);
+			estimatedAt = ticks;
+		}
+		return estimate;
 	}
 
 	/** Reads Codex Session Chronicle's filed sessions for this account; never writes them. Empty when it is not installed. */
