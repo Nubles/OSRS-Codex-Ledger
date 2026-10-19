@@ -19,6 +19,14 @@ public class FormatTest
 	}
 
 	@Test
+	public void stacksUseTheSuitesLowercaseK()
+	{
+		assertEquals("450k", Format.stack(450_000));
+		assertEquals("99999", Format.stack(99_999));
+		assertEquals("12M", Format.stack(12_000_000));
+	}
+
+	@Test
 	public void billionsCarryTwoPlaces()
 	{
 		assertEquals("1.50B", Format.coins(1_504_200_000L));
