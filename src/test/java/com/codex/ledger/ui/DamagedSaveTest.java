@@ -257,6 +257,28 @@ public class DamagedSaveTest
 		damaged = tree(whole);
 		damaged.getAsJsonObject("stores").add("SAILING_HOLD", PARSER.parse("{\"seen\":1,\"items\":{\"995\":5}}"));
 		assertTrue(Ledger.read(GSON, damaged.toString()).isMended());
+		// So are a later version's fields, which read without an error and would be gone at the next save.
+		damaged = tree(whole);
+		damaged.addProperty("version", 9);
+		assertTrue(Ledger.read(GSON, damaged.toString()).isMended());
+		damaged = tree(whole);
+		damaged.getAsJsonArray("days").get(0).getAsJsonObject().addProperty("sailed", 4);
+		assertTrue(Ledger.read(GSON, damaged.toString()).isMended());
+		// Every save the plugin itself writes, trimmed to its budget or not, reads as whole.
+		assertFalse(Ledger.read(GSON, new Saver(200_000).save(before, GSON::toJson)).isMended());
+		assertFalse(Ledger.read(GSON, GSON.toJson(new Ledger())).isMended());
+		for (String fixture : new String[]{"ledger-seen.json", "ledger-unseen.json"})
+		{
+			try (java.io.InputStream in = Ledger.class.getResourceAsStream(fixture))
+			{
+				String saved = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+				assertFalse(fixture, Ledger.read(GSON, saved).isMended());
+			}
+			catch (java.io.IOException e)
+			{
+				throw new AssertionError(e);
+			}
+		}
 		// One copy is kept: the first, then only a save at least as full, never a stub over it.
 		assertTrue(Ledger.setAside(null, whole));
 		assertFalse(Ledger.setAside(whole, whole));

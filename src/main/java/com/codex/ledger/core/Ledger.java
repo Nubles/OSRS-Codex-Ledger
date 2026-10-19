@@ -925,9 +925,85 @@ public final class Ledger
 		{
 			return null;
 		}
-		// A place only a later version knows reads as no place at all, and is left out below.
-		read.mended = partial || read.stores != null && read.stores.containsKey(null);
+		// Read without an error, a later version's fields (or a place only it knows, which reads as no place)
+		// are passed over in silence and would be lost at the next save: compared with what was saved.
+		read.mended = partial || read.stores != null && read.stores.containsKey(null) || !covers(tree(gson, json), toTree(gson, read));
 		return read.repair();
+	}
+
+	private static JsonElement tree(Gson gson, String json)
+	{
+		try
+		{
+			return gson.fromJson(json, JsonElement.class);
+		}
+		catch (RuntimeException | StackOverflowError e)
+		{
+			return null;
+		}
+	}
+
+	private static JsonElement toTree(Gson gson, Object value)
+	{
+		try
+		{
+			return gson.toJsonTree(value);
+		}
+		catch (RuntimeException | StackOverflowError e)
+		{
+			return null;
+		}
+	}
+
+	/**
+	 * True when every field and list entry in {@code saved} is still there in {@code reread}, the value
+	 * read from it written out again: nothing was passed over. Only the shape is compared, not the
+	 * figures, which reading may bring back to sense; a field saved as null was nothing to lose.
+	 */
+	static boolean covers(JsonElement saved, JsonElement reread)
+	{
+		if (saved == null || saved.isJsonNull())
+		{
+			return true;
+		}
+		if (reread == null || reread.isJsonNull())
+		{
+			return false;
+		}
+		if (saved.isJsonObject())
+		{
+			if (!reread.isJsonObject())
+			{
+				return false;
+			}
+			JsonObject now = reread.getAsJsonObject();
+			for (Map.Entry<String, JsonElement> field : saved.getAsJsonObject().entrySet())
+			{
+				if (!covers(field.getValue(), now.get(field.getKey())))
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+		if (saved.isJsonArray())
+		{
+			if (!reread.isJsonArray() || reread.getAsJsonArray().size() < saved.getAsJsonArray().size())
+			{
+				return false;
+			}
+			JsonArray then = saved.getAsJsonArray();
+			JsonArray now = reread.getAsJsonArray();
+			for (int i = 0; i < then.size(); i++)
+			{
+				if (!covers(then.get(i), now.get(i)))
+				{
+					return false;
+				}
+			}
+			return true;
+		}
+		return true;
 	}
 
 	/**
