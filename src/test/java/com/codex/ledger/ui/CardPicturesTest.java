@@ -140,4 +140,24 @@ public class CardPicturesTest
 		CardPictures.draw(null, icons -> card, delivered::add);
 		assertEquals(2, delivered.size());
 	}
+
+	@Test
+	public void aCardStillWaitingWhenThePluginStopsIsNeverHandedOver() throws Exception
+	{
+		Late late = new Late();
+		List<BufferedImage> delivered = new ArrayList<>();
+		javax.swing.SwingUtilities.invokeAndWait(() ->
+			CardPictures.draw(late, icons -> card(icons, late, new ArrayList<>()), delivered::add));
+		// The plugin stops while the card waits; its pictures turn up afterwards.
+		javax.swing.SwingUtilities.invokeAndWait(CardPictures::cancel);
+		late.callbacks.get(995).run();
+		late.callbacks.get(4151).run();
+		javax.swing.SwingUtilities.invokeAndWait(() -> { });
+		assertTrue(delivered.isEmpty());
+		// And the next card, after a restart, is not held back by the dropped one.
+		ItemIcons ready = (id, cb) -> new BufferedImage(36, 32, BufferedImage.TYPE_INT_ARGB);
+		javax.swing.SwingUtilities.invokeAndWait(() ->
+			CardPictures.draw(ready, icons -> new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB), delivered::add));
+		assertEquals(1, delivered.size());
+	}
 }

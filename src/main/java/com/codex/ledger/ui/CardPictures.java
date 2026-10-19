@@ -6,6 +6,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import javax.swing.SwingUtilities;
@@ -117,16 +118,73 @@ public final class CardPictures implements ItemIcons
 		{
 			return;
 		}
-		draw(icons, render, deliver, SwingUtilities::invokeLater, run ->
+		int generation = GENERATION.get();
+		Timer[] wait = new Timer[1];
+		draw(icons, pictures -> GENERATION.get() == generation ? render.apply(pictures) : null, card ->
+		{
+			// A card still waiting when the plugin stopped is dropped, not saved by a plugin that is gone.
+			if (GENERATION.get() == generation)
+			{
+				deliver.accept(card);
+			}
+		}, SwingUtilities::invokeLater, run ->
 		{
 			Timer timer = new Timer(WAIT_MS, e -> run.run());
 			timer.setRepeats(false);
+			wait[0] = timer;
+			waitTimer = timer;
 			timer.start();
-		}, () -> BUSY.set(false));
+		}, () ->
+		{
+			// The wait is over either way; a card drawn early lets go of its timer.
+			if (wait[0] != null)
+			{
+				wait[0].stop();
+			}
+			if (waitTimer == wait[0])
+			{
+				waitTimer = null;
+			}
+			if (GENERATION.get() == generation)
+			{
+				BUSY.set(false);
+			}
+		});
+	}
+
+	/**
+	 * Lets go of a card still waiting for its pictures, for the plugin's shutdown: it is never handed
+	 * over, and the next card (after a restart) is not held back by it.
+	 */
+	public static void cancel()
+	{
+		GENERATION.incrementAndGet();
+		BUSY.set(false);
+		Runnable stop = () ->
+		{
+			if (waitTimer != null)
+			{
+				waitTimer.stop();
+				waitTimer = null;
+			}
+		};
+		// Plugins stop on the Swing thread; there it is done before any new card can begin.
+		if (SwingUtilities.isEventDispatchThread())
+		{
+			stop.run();
+		}
+		else
+		{
+			SwingUtilities.invokeLater(stop);
+		}
 	}
 
 	/** True while a card waits for its pictures. */
 	private static final AtomicBoolean BUSY = new AtomicBoolean();
+	/** Moved on by {@link #cancel}, so a card begun before it is dropped. */
+	private static final AtomicInteger GENERATION = new AtomicInteger();
+	/** The wait of the card waiting now; used on the Swing thread only. */
+	private static Timer waitTimer;
 
 	/**
 	 * As {@link #draw(ItemIcons, Function, Consumer)}, with how to get back on the Swing thread and how

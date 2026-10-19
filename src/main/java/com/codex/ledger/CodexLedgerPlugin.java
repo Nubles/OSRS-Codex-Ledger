@@ -15,6 +15,7 @@ import com.codex.ledger.core.Store;
 import com.codex.ledger.overlay.WorthPlaque;
 import com.codex.ledger.ui.Format;
 import com.codex.ledger.ui.IconWatch;
+import com.codex.ledger.ui.CardPictures;
 import com.codex.ledger.ui.ItemIcons;
 import com.codex.ledger.ui.LedgerPanel;
 import com.codex.ledger.ui.ShareActions;
@@ -291,6 +292,8 @@ public class CodexLedgerPlugin extends Plugin
 	{
 		overlayManager.remove(plaque);
 		clientToolbar.removeNavigation(navButton);
+		// A card still waiting for its pictures is never saved or copied once the plugin is off.
+		CardPictures.cancel();
 		clientThread.invokeLater(() ->
 		{
 			save();
