@@ -13,8 +13,9 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 /**
- * Other Codex plugins (Annals for its year's worth, Gear Roadmap for its savings pace) read the
- * saved ledger, read only: the top level "total" and "history" as a list of {"t": epoch ms, "v":
+ * Other Codex plugins (Annals for its year's worth, Gear Roadmap for its savings pace, Session
+ * Chronicle for a session's net worth) read the saved ledger, read only: the top level "total",
+ * "since" (when the bank was first seen, 0 before) and "history" as a list of {"t": epoch ms, "v":
  * worth}, oldest first. Renaming or reshaping either breaks them without a compile error, so the
  * shape is pinned here.
  */
@@ -37,6 +38,8 @@ public class SavedShapeTest
 		Gson gson = new GsonBuilder().create();
 		JsonObject saved = new JsonParser().parse(gson.toJson(ledger)).getAsJsonObject();
 		assertEquals(3_500_000L, saved.get("total").getAsLong());
+		// Session Chronicle takes a worth as whole only once "since" says the bank was seen.
+		assertEquals(t0, saved.get("since").getAsLong());
 		JsonArray history = saved.getAsJsonArray("history");
 		assertTrue(history.size() >= 2);
 		long last = Long.MIN_VALUE;

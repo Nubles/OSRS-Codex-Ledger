@@ -757,9 +757,10 @@ public final class Ledger
 
 	/**
 	 * Trims the ledger until its saved form fits the budget, giving up the least useful detail first:
-	 * items on old pages, then deals on recent ones, then trades of items long gone, then fine worth
-	 * history. What is held, the day totals and the worth curve's shape are never given up, so a
-	 * ledger whose holdings alone pass the budget stays over it.
+	 * items on old pages, then deals on recent ones, then trades of items long gone, then the oldest
+	 * worth history down to {@link #HISTORY_FLOOR} points. What is held, every day's totals and the worth
+	 * curve's shape are never given up, so a ledger whose holdings alone pass the budget stays over it,
+	 * and fitting it again on every save takes nothing more away.
 	 *
 	 * @param size the saved size of the ledger as it stands, in characters
 	 * @return the saved size after trimming
@@ -777,7 +778,9 @@ public final class Ledger
 		return now;
 	}
 
-	private static final int SHRINK_STEPS = 6;
+	private static final int SHRINK_STEPS = 5;
+	/** Worth points trimming always leaves: about a year of daily points beside the recent detail. */
+	static final int HISTORY_FLOOR = 400;
 
 	/** One step of trimming; true when it took anything away. */
 	private boolean shrink(int step)
@@ -810,22 +813,21 @@ public final class Ledger
 					days.get(closed).trim(Day.KEPT_ITEMS * 2);
 				}
 				break;
-			case 4:
-				// Every other point of the worth history, keeping its first and newest.
-				List<Point> thinned = new ArrayList<>();
-				for (int i = 0; i < history.size(); i++)
-				{
-					if (i % 2 == 0 || i == history.size() - 1)
-					{
-						thinned.add(history.get(i));
-					}
-				}
-				history = thinned;
-				break;
 			default:
-				while (days.size() > DEAL_DAYS)
+				// Every other one of the oldest points of the worth history, never thinning it below a
+				// floor: a save over budget on every pass must not wear the curve away pass by pass.
+				int spare = history.size() - HISTORY_FLOOR;
+				if (spare > 0)
 				{
-					days.remove(0);
+					List<Point> thinned = new ArrayList<>();
+					for (int i = 0; i < history.size(); i++)
+					{
+						if (i == 0 || i == history.size() - 1 || i > 2 * spare || i % 2 == 0)
+						{
+							thinned.add(history.get(i));
+						}
+					}
+					history = thinned;
 				}
 				break;
 		}

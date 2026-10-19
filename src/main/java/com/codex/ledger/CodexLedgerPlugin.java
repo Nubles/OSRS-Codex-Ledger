@@ -690,8 +690,10 @@ public class CodexLedgerPlugin extends Plugin
 		{
 			return known;
 		}
-		ItemComposition item = itemManager.getItemComposition(itemId);
-		ItemStats stats = itemManager.getItemStats(itemId);
+		// A noted platebody is still gear: the game gives a note no stats and no menu of its own.
+		int base = itemManager.canonicalize(itemId);
+		ItemComposition item = itemManager.getItemComposition(base);
+		ItemStats stats = itemManager.getItemStats(base);
 		boolean equipable = stats != null && stats.isEquipable() && stats.getEquipment() != null;
 		Kind kind = Kinds.of(itemId, item.getName(), item.getInventoryActions(), equipable,
 			equipable ? stats.getEquipment().getSlot() : -1, item.isStackable());

@@ -70,6 +70,23 @@ public class SaveSizeTest
 		assertEquals(before, GSON.toJson(small));
 	}
 
+	@Test
+	public void aLedgerThatCannotFitIsNotWornAwaySaveAfterSave()
+	{
+		// Holdings alone over the budget: every save fits again, and each pass used to halve the worth
+		// history and drop every page older than a month, until the curve was a handful of points.
+		Ledger ledger = busyYear();
+		int points = ledger.getHistory().size();
+		long newest = ledger.getHistory().get(points - 1).getTime();
+		for (int save = 0; save < 12; save++)
+		{
+			ledger.fit(1, l -> GSON.toJson(l).length());
+		}
+		assertEquals("every day's totals are kept", Ledger.DAYS, ledger.getDays().size());
+		assertEquals(Math.min(points, Ledger.HISTORY_FLOOR), ledger.getHistory().size());
+		assertEquals("the newest point is kept", newest, ledger.getHistory().get(ledger.getHistory().size() - 1).getTime());
+	}
+
 	static Ledger busy(int days)
 	{
 		Random r = new Random(7);
