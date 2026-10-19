@@ -402,6 +402,7 @@ public final class LedgerCard
 		y += bar + 8;
 		g.setFont(Theme.small());
 		FontMetrics fm = g.getFontMetrics();
+		String[] shares = Format.shares(s.kinds, sum);
 		int col = cw / all.length;
 		for (int i = 0; i < all.length && i < s.kinds.length; i++)
 		{
@@ -413,7 +414,7 @@ public final class LedgerCard
 			g.setColor(empty ? Theme.TEXT_FAINT : Theme.TEXT);
 			g.drawString(all[i].getLabel(), cx + 10, y + fm.getAscent());
 			g.setColor(empty ? Theme.TEXT_FAINT : Theme.TEXT_MUTED);
-			g.drawString(Format.percent(Math.max(0, s.kinds[i]) / (double) sum), cx + 10, y + fm.getAscent() + fm.getHeight());
+			g.drawString(shares[i], cx + 10, y + fm.getAscent() + fm.getHeight());
 		}
 		return y + fm.getHeight() * 2 + 12;
 	}
@@ -427,7 +428,6 @@ public final class LedgerCard
 		}
 		header(g, "Most valuable", "share", x, y, cw);
 		y += 24;
-		long total = Math.max(1, s.total);
 		g.setFont(Theme.body());
 		FontMetrics body = g.getFontMetrics();
 		g.setFont(Theme.small());
@@ -439,6 +439,19 @@ public final class LedgerCard
 		{
 			valueW = Math.max(valueW, body.stringWidth(Format.coins(h.value)));
 		}
+		long[] values = new long[s.held.size()];
+		for (int i = 0; i < values.length; i++)
+		{
+			values[i] = s.held.get(i).value;
+		}
+		// Shares of the whole worth, rounded together so they never add up past it.
+		String[] shares = Format.shares(values, s.total);
+		long sum = 0;
+		for (long v : values)
+		{
+			sum += Math.max(0, v);
+		}
+		long total = Math.max(1, Math.max(s.total, sum));
 		// Every share rail runs the same length, so the shares can be compared at a glance.
 		int railW = cw - 33 - shareW - 8 - valueW - 8;
 		for (int i = 0; i < s.held.size(); i++)
@@ -457,7 +470,7 @@ public final class LedgerCard
 			}
 			double share = h.value / (double) total;
 			String value = Format.coins(h.value);
-			String pct = Format.percent(share);
+			String pct = shares[i];
 			int tx = x + 33;
 			int vx = x + cw - shareW - 8 - body.stringWidth(value);
 			g.setFont(Theme.body());
@@ -485,7 +498,7 @@ public final class LedgerCard
 		{
 			return y;
 		}
-		header(g, "Milestones", (m.isRegain() ? "back to " : "next ") + Format.coins(m.getNext()), x, y, cw);
+		header(g, "Milestones", nextMark(m, s.forecast), x, y, cw);
 		y += 24;
 		boolean first = true;
 		for (Milestones.Mark mark : m.getPassed())
@@ -495,6 +508,20 @@ public final class LedgerCard
 			y += MilestoneRow.HEIGHT + 4;
 		}
 		return y + 8;
+	}
+
+	/**
+	 * The milestones heading's note, "next 1B" or "back to 750M", or null when the goal section
+	 * already names that same figure (with no goal set it aims at the next round figure), so one
+	 * figure is never headed twice.
+	 */
+	static String nextMark(Milestones m, Forecast f)
+	{
+		if (f != null && f.getTarget() == m.getNext())
+		{
+			return null;
+		}
+		return (m.isRegain() ? "back to " : "next ") + Format.mark(m.getNext());
 	}
 
 	/** What play paid best an hour, from Session Chronicle's sessions. */
@@ -537,7 +564,7 @@ public final class LedgerCard
 		{
 			return y;
 		}
-		header(g, f.isGoalSet() ? "Goal" : "Heading for", Format.coins(f.getTarget()), x, y, cw);
+		header(g, f.isGoalSet() ? "Goal" : "Heading for", Format.mark(f.getTarget()), x, y, cw);
 		y += 24;
 		g.setFont(Theme.body());
 		FontMetrics body = g.getFontMetrics();

@@ -214,12 +214,22 @@ public class CodexLedgerPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
-		ItemIcons icons = (itemId, onLoaded) ->
+		ItemIcons icons = new ItemIcons()
 		{
-			AsyncBufferedImage image = itemManager.getImage(itemId);
-			// Only until it arrives: a loaded picture would run the callback again on every paint.
-			iconWatch.watch(image, onLoaded, image::onLoaded);
-			return image;
+			@Override
+			public BufferedImage icon(int itemId, Runnable onLoaded)
+			{
+				AsyncBufferedImage image = itemManager.getImage(itemId);
+				// Only until it arrives: a loaded picture would run the callback again on every paint.
+				iconWatch.watch(image, onLoaded, image::onLoaded);
+				return image;
+			}
+
+			@Override
+			public boolean hasArrived(BufferedImage image)
+			{
+				return iconWatch.hasArrived(image);
+			}
 		};
 		panel = new LedgerPanel(icons);
 		panel.setShare(new ShareActions()

@@ -9,6 +9,7 @@ import com.codex.ledger.core.Earnings;
 import com.codex.ledger.core.Forecast;
 import com.codex.ledger.core.Ledger;
 import com.codex.ledger.core.Milestones;
+import com.codex.ledger.core.Months;
 import com.codex.ledger.core.Offer;
 import com.codex.ledger.core.Report;
 import com.codex.ledger.core.Store;
@@ -57,6 +58,8 @@ public class LedgerPanel extends PluginPanel
 	private static final int[] SPAN_DAYS = {1, 7, 30, 0};
 	private static final int LINES = 6;
 	private static final int PAGES = 14;
+	/** Months of the day book listed; its 120 days of pages reach into at most five. */
+	private static final int MONTHS = 5;
 	private static final int HOARD = 40;
 	private static final int TRADED = 12;
 	private static final int HELD = 8;
@@ -555,7 +558,7 @@ public class LedgerPanel extends PluginPanel
 	{
 		Forecast f = Forecast.of(ledger, today(), goal.amount);
 		String name = f.isGoalSet() ? (goal.name.isEmpty() ? "Your goal" : goal.name) : "Next mark";
-		stack.add(new SectionHeader(f.isGoalSet() ? "Goal" : "Heading for", Format.coins(f.getTarget())));
+		stack.add(new SectionHeader(f.isGoalSet() ? "Goal" : "Heading for", Format.mark(f.getTarget())));
 		Card card = new Card(new BorderLayout(0, 5));
 		card.accent(f.isReached() ? Theme.GREEN : Theme.GOLD);
 		JPanel top = new JPanel(new BorderLayout(6, 0));
@@ -578,7 +581,9 @@ public class LedgerPanel extends PluginPanel
 		{
 			return;
 		}
-		stack.add(new SectionHeader("Milestones", (m.isRegain() ? "back to " : "next ") + Format.coins(m.getNext())));
+		Forecast f = Forecast.of(ledger, today(), goal.amount);
+		String next = LedgerCard.nextMark(m, f);
+		stack.add(new SectionHeader("Milestones", next == null ? "" : next));
 		JPanel list = new JPanel(new GridLayout(0, 1, 0, 4));
 		list.setOpaque(false);
 		boolean first = true;
@@ -588,7 +593,9 @@ public class LedgerPanel extends PluginPanel
 			first = false;
 		}
 		stack.add(list);
-		stack.add(Ui.wrapped(Format.coins(m.getToGo()) + " to " + Format.coins(m.getNext()) + ". Round figures passed while the ledger watched.",
+		// The goal above already says how far its figure is; only a different next figure is worth a line here.
+		stack.add(Ui.wrapped((next == null ? "" : Format.coins(m.getToGo()) + " to " + Format.mark(m.getNext()) + ". ")
+			+ "Round figures passed while the ledger watched.",
 			Theme.small(), Theme.TEXT_FAINT, WIDTH - 10));
 	}
 
@@ -688,7 +695,9 @@ public class LedgerPanel extends PluginPanel
 		LedgerCard.Statement s = statement();
 		if (s != null && share != null)
 		{
-			share.save(LedgerCard.render(s, icons, null), LedgerCard.fileName(now, zone));
+			String file = LedgerCard.fileName(now, zone);
+			// Drawn once its five pictures are in, so none is saved as an empty well.
+			CardPictures.draw(icons, pictures -> LedgerCard.render(s, pictures, null), card -> share.save(card, file));
 		}
 	}
 
@@ -697,7 +706,7 @@ public class LedgerPanel extends PluginPanel
 		LedgerCard.Statement s = statement();
 		if (s != null && share != null)
 		{
-			share.copy(LedgerCard.render(s, icons, null));
+			CardPictures.draw(icons, pictures -> LedgerCard.render(s, pictures, null), share::copy);
 		}
 	}
 
@@ -882,6 +891,11 @@ public class LedgerPanel extends PluginPanel
 			stack.add(note("A quiet page", "Nothing came in or went out yet. Loot, supplies used, trades and price moves all land here as they happen."));
 		}
 
+		if (page == null)
+		{
+			months(stack);
+		}
+
 		List<Day> days = new ArrayList<>(ledger.getDays());
 		Collections.reverse(days);
 		if (!days.isEmpty())
@@ -913,6 +927,29 @@ public class LedgerPanel extends PluginPanel
 			}
 		}
 		replace(daybook, stack);
+	}
+
+	/**
+	 * The day book month by month, newest first, once it reaches into a second month: a statement for
+	 * each with what it made, its close and its best day.
+	 */
+	private void months(StackPanel stack)
+	{
+		List<Months.Month> months = Months.of(ledger.getDays(), today(), MONTHS);
+		if (months.size() < 2)
+		{
+			return;
+		}
+		long scale = 1;
+		for (Months.Month m : months)
+		{
+			scale = Math.max(scale, Math.max(Math.abs(m.getPlay()), Math.abs(m.getMarket())));
+		}
+		stack.add(new SectionHeader("Months", months.size() + " months"));
+		for (Months.Month m : months)
+		{
+			stack.add(new MonthRow(m, scale));
+		}
 	}
 
 	/** The play taken apart by how it happened: trading, loot, supplies, coins and deaths. */
@@ -1154,15 +1191,25 @@ public class LedgerPanel extends PluginPanel
 			return;
 		}
 		long total = Math.max(1, ledger.getTotal());
-		long topFive = 0;
-		for (int i = 0; i < lines.size() && i < 5; i++)
+		long[] values = new long[Math.min(HOARD, lines.size())];
+		for (int i = 0; i < values.length; i++)
 		{
-			topFive += lines.get(i).getValue();
+			values[i] = lines.get(i).getValue();
+		}
+		// Shares rounded together, so the rows never add up past the whole worth, and the five
+		// named in the heading add up to just what their rows say.
+		int[] points = Format.sharePoints(values, total);
+		String[] shares = Format.shares(values, total);
+		int topFive = 0;
+		for (int i = 0; i < points.length && i < 5; i++)
+		{
+			topFive += points[i];
 		}
 		Card head = new Card(new BorderLayout(0, 4));
 		head.highlighted(true);
 		head.add(Ui.label(lines.size() + " kinds of item", Theme.title(), Theme.GOLD_BRIGHT), BorderLayout.NORTH);
-		head.add(Ui.wrapped("Your five most valuable hold " + Format.percent(topFive / (double) total) + " of your worth."
+		head.add(Ui.wrapped((lines.size() > 5 ? "Your five most valuable hold " + (topFive == 0 ? "<1" : String.valueOf(topFive)) + "% of your worth."
+			: "That is everything you hold, below.")
 			+ (ledger.isReady() ? "" : " Open your bank to count the rest."), Theme.small(), Theme.TEXT_MUTED, WIDTH - 30), BorderLayout.CENTER);
 		stack.add(head);
 
@@ -1177,7 +1224,7 @@ public class LedgerPanel extends PluginPanel
 			String note = each <= 1 ? Format.whole(l.getQuantity())
 				: l.getQuantity() > 1 ? Format.whole(l.getQuantity()) + " x " + Format.coins(each) : Format.coins(each) + " each";
 			Color color = i == 0 ? Theme.GOLD_BRIGHT : Theme.GOLD;
-			list.add(new ItemRow(l.getItemId(), name, note, Format.coins(l.getValue()), color, l.getValue() / (double) total, icons,
+			list.add(new ItemRow(l.getItemId(), name, note, Format.coins(l.getValue()), color, l.getValue() / (double) total, shares[i], icons,
 				name + ": " + Format.whole(l.getQuantity()) + ", worth " + Format.coins(l.getValue()) + ". " + places(l.getItemId())));
 		}
 		stack.add(list);

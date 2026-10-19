@@ -1,6 +1,8 @@
 package com.codex.ledger.ui;
 
+import com.codex.ledger.core.Forecast;
 import com.codex.ledger.core.Ledger;
+import com.codex.ledger.core.Milestones;
 import com.codex.ledger.core.Prices;
 import com.codex.ledger.core.Store;
 import java.awt.Font;
@@ -85,6 +87,18 @@ public class LedgerCardTest
 		assertEquals("Item 4151", s.held.get(1).name);
 		assertEquals(500_000_000L, s.milestones.getPassed().get(0).getAmount());
 		assertTrue(s.pays.isEmpty());
+	}
+
+	@Test
+	public void oneFigureIsNeverHeadedTwice()
+	{
+		Ledger ledger = rising();
+		long now = T0 + 14 * DAY;
+		Milestones m = Milestones.of(ledger.getHistory(), ledger.getTotal(), now);
+		// With no goal the goal section heads for the next round figure, so the milestones leave it out.
+		assertNull(LedgerCard.nextMark(m, Forecast.of(ledger, day(now), 0)));
+		assertNull(LedgerCard.nextMark(m, Forecast.of(ledger, day(now), m.getNext())));
+		assertEquals("next " + Format.mark(m.getNext()), LedgerCard.nextMark(m, Forecast.of(ledger, day(now), 2_000_000_000L)));
 	}
 
 	@Test

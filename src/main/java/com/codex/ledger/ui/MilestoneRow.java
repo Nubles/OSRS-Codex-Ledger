@@ -30,7 +30,7 @@ class MilestoneRow extends JComponent
 		this.newest = newest;
 		setOpaque(false);
 		setPreferredSize(new Dimension(10, HEIGHT));
-		setToolTipText("Your worth first passed " + Format.coins(mark.getAmount()) + " on " + Format.date(mark.getAt()) + ".");
+		setToolTipText("Your worth first passed " + Format.mark(mark.getAmount()) + " on " + Format.date(mark.getAt()) + ".");
 	}
 
 	@Override
@@ -73,7 +73,7 @@ class MilestoneRow extends JComponent
 		g.fill(stamp);
 		g.setFont(Theme.small());
 		FontMetrics small = g.getFontMetrics();
-		String figure = Format.coins(mark.getAmount());
+		String figure = Format.mark(mark.getAmount());
 
 		int tx = Math.round(cx + COIN + 9);
 		g.setFont(Theme.body());
@@ -84,7 +84,7 @@ class MilestoneRow extends JComponent
 		g.setFont(Theme.small());
 		g.setColor(Theme.TEXT_MUTED);
 		g.drawString(when, x + w - 9 - small.stringWidth(when), y + 6 + fm.getAscent() - 2);
-		String after = mark.getAfter() < 0 ? "the first the ledger saw" : Format.gap(mark.getAfter()) + " after " + Format.coins(mark.getPrevious());
+		String after = mark.getAfter() < 0 ? "the first the ledger saw" : Format.gap(mark.getAfter()) + " after " + Format.mark(mark.getPrevious());
 		g.setColor(Theme.TEXT_FAINT);
 		g.drawString(Ui.clip(after, small, x + w - 9 - tx), tx, y + HEIGHT - 8);
 	}

@@ -19,38 +19,37 @@ public final class Format
 	{
 	}
 
-	/** "8,240", "41.2k", "412k", "1.24M". */
+	/**
+	 * Coins at one precision per unit, so figures side by side read alike: "8,240", "41.2k", "412.3k",
+	 * "4.9M", "26.0M", "835.5M", "1.504B". A zero after the point is kept ("26.0M", not "26M").
+	 */
 	public static String amount(long n)
 	{
 		if (n < 10_000)
 		{
 			return String.format(Locale.ENGLISH, "%,d", n);
 		}
-		if (n < 100_000)
+		// A figure that rounds up to a thousand of one unit is written in the next ("1.0M", not "1000.0k").
+		if (n < 999_950)
 		{
-			return trim(n / 1_000.0, 1) + "k";
+			return fixed(n / 1_000.0, 1) + "k";
 		}
-		if (n < 1_000_000)
+		if (n < 999_950_000)
 		{
-			return Math.round(n / 1_000.0) + "k";
+			return fixed(n / 1_000_000.0, 1) + "M";
 		}
-		if (n < 10_000_000)
+		if (n < 9_999_500_000L)
 		{
-			return trim(n / 1_000_000.0, 2) + "M";
+			return fixed(n / 1_000_000_000.0, 3) + "B";
 		}
-		if (n < 1_000_000_000)
-		{
-			return trim(n / 1_000_000.0, 1) + "M";
-		}
-		if (n < 10_000_000_000L)
-		{
-			return trim(n / 1_000_000_000.0, 3) + "B";
-		}
-		return trim(n / 1_000_000_000.0, 2) + "B";
+		return fixed(n / 1_000_000_000.0, 2) + "B";
 	}
 
-	/** At most three figures, for tight columns: "8,240", "41.2k", "628M", "1.53B". */
-	public static String compact(long n)
+	/**
+	 * A round figure, a milestone or a target, by its name: "1M", "750M", "1B", "1.5B". Only these
+	 * drop the zeros after the point; any other figure is written by {@link #amount}.
+	 */
+	public static String mark(long n)
 	{
 		if (n < 10_000)
 		{
@@ -58,13 +57,34 @@ public final class Format
 		}
 		if (n < 1_000_000)
 		{
-			return n < 100_000 ? trim(n / 1_000.0, 1) + "k" : Math.round(n / 1_000.0) + "k";
+			return trim(n / 1_000.0, 1) + "k";
 		}
 		if (n < 1_000_000_000)
 		{
-			return n < 10_000_000 ? trim(n / 1_000_000.0, 2) + "M" : n < 100_000_000 ? trim(n / 1_000_000.0, 1) + "M" : Math.round(n / 1_000_000.0) + "M";
+			return trim(n / 1_000_000.0, 2) + "M";
 		}
-		return n < 10_000_000_000L ? trim(n / 1_000_000_000.0, 2) + "B" : trim(n / 1_000_000_000.0, 1) + "B";
+		return trim(n / 1_000_000_000.0, 3) + "B";
+	}
+
+	/** Three figures always, for tight columns: "8,240", "41.2k", "412k", "4.90M", "26.0M", "628M", "1.53B". */
+	public static String compact(long n)
+	{
+		if (n < 10_000)
+		{
+			return String.format(Locale.ENGLISH, "%,d", n);
+		}
+		String[] units = {"k", "M", "B"};
+		double v = n / 1_000.0;
+		for (int u = 0; ; u++)
+		{
+			int places = v < 9.995 ? 2 : v < 99.95 ? 1 : 0;
+			// Past the last unit, or still under a thousand once rounded: write it in this unit.
+			if (u == units.length - 1 || Math.round(v) < 1000)
+			{
+				return fixed(v, places) + units[u];
+			}
+			v /= 1_000.0;
+		}
 	}
 
 	/** A change with its sign, in at most three figures: "+628M". */
@@ -111,6 +131,66 @@ public final class Format
 			return "<1%";
 		}
 		return Math.round(share * 100) + "%";
+	}
+
+	/**
+	 * Each value's share of a whole as whole percents that add up as the values do: to 100% when the
+	 * values make the whole, never past it. Rounding each share on its own can give 101%; here the
+	 * points left over go to the shares that lost the most in rounding down. A share too small for a
+	 * point of its own reads "<1%".
+	 *
+	 * @param whole what the shares are of; when the values add up to more, their sum is used instead
+	 */
+	public static String[] shares(long[] values, long whole)
+	{
+		int[] points = sharePoints(values, whole);
+		String[] out = new String[values.length];
+		for (int i = 0; i < values.length; i++)
+		{
+			out[i] = points[i] == 0 && values[i] > 0 ? "<1%" : points[i] + "%";
+		}
+		return out;
+	}
+
+	/** The whole percents {@link #shares} writes, as numbers. */
+	public static int[] sharePoints(long[] values, long whole)
+	{
+		long sum = 0;
+		for (long v : values)
+		{
+			sum += Math.max(0, v);
+		}
+		double denom = Math.max(whole, sum);
+		int[] points = new int[values.length];
+		if (denom <= 0)
+		{
+			return points;
+		}
+		double[] lost = new double[values.length];
+		int given = 0;
+		for (int i = 0; i < values.length; i++)
+		{
+			double exact = Math.max(0, values[i]) * 100 / denom;
+			points[i] = (int) Math.floor(exact);
+			lost[i] = exact - points[i];
+			given += points[i];
+		}
+		int target = (int) Math.round(sum * 100 / denom);
+		while (given < target)
+		{
+			int best = -1;
+			for (int i = 0; i < values.length; i++)
+			{
+				if (values[i] > 0 && (best < 0 || lost[i] > lost[best]))
+				{
+					best = i;
+				}
+			}
+			points[best]++;
+			lost[best] = -1;
+			given++;
+		}
+		return points;
 	}
 
 	/** A return as a signed percent: "+26%", "-3.4%", "+0.8%". */
@@ -170,6 +250,12 @@ public final class Format
 			return minutes / 60 + "h ago";
 		}
 		return minutes / (24 * 60) + "d ago";
+	}
+
+	/** A figure to exactly that many places, with a full stop whatever the computer's language. */
+	private static String fixed(double value, int places)
+	{
+		return String.format(Locale.ENGLISH, "%." + places + "f", value);
 	}
 
 	private static String trim(double value, int places)

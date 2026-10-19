@@ -25,6 +25,8 @@ class KindBreakdown extends JComponent
 	private final long[] worth;
 	private final long[] change;
 	private final long total;
+	/** Each kind's share by ordinal, rounded together to make 100%. */
+	private final String[] shares;
 
 	/**
 	 * @param worth by {@link Kind} ordinal
@@ -40,6 +42,7 @@ class KindBreakdown extends JComponent
 			sum += Math.max(0, v);
 		}
 		total = Math.max(1, sum);
+		shares = Format.shares(worth, total);
 		setOpaque(false);
 		setPreferredSize(new Dimension(10, BAR + 8 + ORDER.length * ROW));
 		StringBuilder tip = new StringBuilder("<html>Coins and platinum; gear is anything worn, bar ammunition;<br>"
@@ -94,7 +97,7 @@ class KindBreakdown extends JComponent
 			int base = mid + fm.getAscent() / 2 - 1;
 			Ui.shadowed(g, k.getLabel(), 14, base, Theme.TEXT);
 			String value = Format.coins(v);
-			String pct = Format.percent(Math.max(0, v) / (double) total);
+			String pct = shares[k.ordinal()];
 			int vw = fm.stringWidth(value);
 			Ui.shadowed(g, value, w - pctW - vw - 4, base, Theme.mix(c, Theme.TEXT, 0.35));
 			g.setColor(Theme.TEXT_FAINT);
