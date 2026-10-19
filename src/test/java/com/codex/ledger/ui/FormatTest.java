@@ -110,6 +110,22 @@ public class FormatTest
 	}
 
 	@Test
+	public void aSliverBesideAlmostAllReadsAsBoth()
+	{
+		// 99.6% and 0.4% once read "100%" beside "<1%": the two must read as parts of one whole.
+		assertArrayEquals(new String[]{">99%", "<1%"}, Format.shares(new long[]{996, 4}, 1000));
+		assertArrayEquals(new String[]{">99%", "<1%", "<1%"}, Format.shares(new long[]{9_990, 4, 6}, 10_000));
+		// All of it really is 100%, and nothing alongside is hidden by the fix.
+		assertArrayEquals(new String[]{"100%", "0%"}, Format.shares(new long[]{1000, 0}, 1000));
+		assertArrayEquals(new String[]{"99%", "1%"}, Format.shares(new long[]{990, 10}, 1000));
+		// One share on its own, such as a goal's progress, never reads full while short of it.
+		assertEquals(">99%", Format.percent(0.996));
+		assertEquals("99%", Format.percent(0.994));
+		assertEquals("100%", Format.percent(1.0));
+		assertEquals("<1%", Format.percent(0.004));
+	}
+
+	@Test
 	public void offersSayHowFarTheyHaveGot()
 	{
 		assertEquals("Bought 21,000 of 50,000", LedgerPanel.offerNote(new Offer(1, true, 50_000, 160, 21_000, 3_340_000, true)));

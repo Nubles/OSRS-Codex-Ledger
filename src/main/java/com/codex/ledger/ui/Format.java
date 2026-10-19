@@ -108,12 +108,17 @@ public final class Format
 		return (n > 0 ? "+" : n < 0 ? "-" : "") + String.format(Locale.ENGLISH, "%,d", Math.abs(n));
 	}
 
-	/** A share as a whole percent, or "<1%". */
+	/** A share as a whole percent, "<1%" for a sliver, and ">99%" when nearly all but not quite. */
 	public static String percent(double share)
 	{
 		if (share > 0 && share < 0.01)
 		{
 			return "<1%";
+		}
+		if (share >= 0.995 && share < 1)
+		{
+			// Rounded it reads 100%, which says "all of it" when some is still missing.
+			return ">99%";
 		}
 		return Math.round(share * 100) + "%";
 	}
@@ -122,17 +127,23 @@ public final class Format
 	 * Each value's share of a whole as whole percents that add up as the values do: to 100% when the
 	 * values make the whole, never past it. Rounding each share on its own can give 101%; here the
 	 * points left over go to the shares that lost the most in rounding down. A share too small for a
-	 * point of its own reads "<1%".
+	 * point of its own reads "<1%", and a share beside one reads ">99%" rather than 100%, since the
+	 * two together cannot be more than all of it.
 	 *
 	 * @param whole what the shares are of; when the values add up to more, their sum is used instead
 	 */
 	public static String[] shares(long[] values, long whole)
 	{
 		int[] points = sharePoints(values, whole);
+		boolean sliver = false;
+		for (int i = 0; i < values.length; i++)
+		{
+			sliver |= points[i] == 0 && values[i] > 0;
+		}
 		String[] out = new String[values.length];
 		for (int i = 0; i < values.length; i++)
 		{
-			out[i] = points[i] == 0 && values[i] > 0 ? "<1%" : points[i] + "%";
+			out[i] = points[i] == 0 && values[i] > 0 ? "<1%" : points[i] >= 100 && sliver ? ">99%" : points[i] + "%";
 		}
 		return out;
 	}
