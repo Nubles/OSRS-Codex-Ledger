@@ -88,6 +88,11 @@ public class CodexLedgerPlugin extends Plugin
 	 * on logout, on a profile switch, when the plugin stops and when the client closes.
 	 */
 	private static final int SAVE_TICKS = 500;
+	/**
+	 * Ticks between saves when only the time logged in moved, about half an hour: the whole book is
+	 * written each time, so standing still does not rewrite it every five minutes.
+	 */
+	private static final int PLAY_SAVE_TICKS = 3_000;
 	/** Ticks between refreshing the panel and plaque while the ledger keeps changing. */
 	private static final int PUBLISH_TICKS = 3;
 	/**
@@ -146,6 +151,8 @@ public class CodexLedgerPlugin extends Plugin
 	private Ledger ledger;
 	private boolean dirty;
 	private boolean unsaved;
+	/** Time logged in counted since the last save, saved with the next change or at the slower pace. */
+	private boolean playUnsaved;
 	private int ticks;
 	private int loggedInTicks = -1;
 	private long worthAtLogin = -1;
@@ -389,7 +396,7 @@ public class CodexLedgerPlugin extends Plugin
 		}
 		if (ledger.played(System.currentTimeMillis(), ZoneId.systemDefault()))
 		{
-			unsaved = true;
+			playUnsaved = true;
 		}
 		ledger.setAtExchange(atExchange());
 		if (ledger.hasPending() || ticks % REVALUE_TICKS == 0)
@@ -405,7 +412,7 @@ public class CodexLedgerPlugin extends Plugin
 			summaryDue = false;
 			summary();
 		}
-		if (unsaved && ticks % SAVE_TICKS == 0)
+		if (unsaved && ticks % SAVE_TICKS == 0 || playUnsaved && ticks % PLAY_SAVE_TICKS == 0)
 		{
 			save();
 		}
@@ -563,17 +570,19 @@ public class CodexLedgerPlugin extends Plugin
 		}
 		ledger.setKinds(this::kind);
 		unsaved = false;
+		playUnsaved = false;
 		dirty = true;
 	}
 
-	/** Writes the ledger to the profile if it changed, and says whether it did. */
+	/** Writes the ledger to the profile if it changed, time logged in included, and says whether it did. */
 	private boolean save()
 	{
-		if (profile == null || ledger == null || !unsaved)
+		if (profile == null || ledger == null || !unsaved && !playUnsaved)
 		{
 			return false;
 		}
 		unsaved = false;
+		playUnsaved = false;
 		String json = gson.toJson(ledger);
 		if (json.length() > SAVE_BUDGET)
 		{
