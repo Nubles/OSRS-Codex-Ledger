@@ -13,7 +13,7 @@ public interface CodexLedgerConfig extends Config
 	@ConfigItem(
 		keyName = "loginSummary",
 		name = "Summary at login",
-		description = "When you log in, write your worth and what prices did while you were away in the chat box",
+		description = "When you log in, put a line in the chat box with your worth, today's change and how far it moved while you were away",
 		position = 0
 	)
 	default boolean loginSummary()
@@ -35,7 +35,7 @@ public interface CodexLedgerConfig extends Config
 	@ConfigItem(
 		keyName = "goal",
 		name = "Worth goal (millions)",
-		description = "A worth to aim for, in millions of coins: 1500 is 1.5B. The Worth page shows how far along you are and when you get there at your pace. 0 aims at the next round figure",
+		description = "A worth to aim for in millions of coins (1500 is 1.5B), shown on the Worth page with when your pace gets you there; 0 aims at the next round figure",
 		position = 2
 	)
 	@Range(min = 0, max = 2_000_000)
@@ -47,7 +47,7 @@ public interface CodexLedgerConfig extends Config
 	@ConfigItem(
 		keyName = "goalName",
 		name = "Goal name",
-		description = "What the goal is for, such as Twisted bow, shown above it on the Worth page",
+		description = "What the goal is for, such as Twisted bow, shown with it on the Worth page and the ledger card",
 		position = 3
 	)
 	default String goalName()
