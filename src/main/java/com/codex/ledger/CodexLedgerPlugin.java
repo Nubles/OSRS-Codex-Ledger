@@ -14,13 +14,19 @@ import com.codex.ledger.core.Saver;
 import com.codex.ledger.core.Store;
 import com.codex.ledger.overlay.WorthPlaque;
 import com.codex.ledger.ui.Format;
+import com.codex.ledger.ui.IconWatch;
 import com.codex.ledger.ui.ItemIcons;
 import com.codex.ledger.ui.LedgerPanel;
+import com.codex.ledger.ui.ShareActions;
 import com.codex.ledger.ui.Sigil;
 import com.google.gson.Gson;
 import com.google.gson.JsonParseException;
 import com.google.gson.reflect.TypeToken;
 import com.google.inject.Provides;
+import java.awt.Toolkit;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.lang.reflect.Type;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -30,6 +36,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ScheduledExecutorService;
+import javax.imageio.ImageIO;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import net.runelite.api.ChatMessageType;
@@ -75,6 +83,7 @@ import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.util.AsyncBufferedImage;
+import net.runelite.client.util.Filepath;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -154,6 +163,11 @@ public class CodexLedgerPlugin extends Plugin
 	@Inject
 	private CodexLedgerConfig config;
 
+	@Inject
+	private ScheduledExecutorService executor;
+
+	/** Hands each item picture's load callback over only until it arrives. */
+	private final IconWatch iconWatch = new IconWatch();
 	private final WorthPlaque plaque = new WorthPlaque();
 	private final Map<Integer, String> names = new HashMap<>();
 	/** What each item is, worked out once on the client thread. */
@@ -203,10 +217,25 @@ public class CodexLedgerPlugin extends Plugin
 		ItemIcons icons = (itemId, onLoaded) ->
 		{
 			AsyncBufferedImage image = itemManager.getImage(itemId);
-			image.onLoaded(onLoaded);
+			// Only until it arrives: a loaded picture would run the callback again on every paint.
+			iconWatch.watch(image, onLoaded, image::onLoaded);
 			return image;
 		};
 		panel = new LedgerPanel(icons);
+		panel.setShare(new ShareActions()
+		{
+			@Override
+			public void save(BufferedImage card, String fileName)
+			{
+				saveCard(card, fileName);
+			}
+
+			@Override
+			public void copy(BufferedImage card)
+			{
+				copyCard(card);
+			}
+		});
 		panel.setOnOpen(() ->
 		{
 			if (panelBehind)
@@ -879,5 +908,63 @@ public class CodexLedgerPlugin extends Plugin
 	private void name(int itemId)
 	{
 		names.computeIfAbsent(itemId, id -> itemManager.getItemComposition(id).getName());
+	}
+
+	/** Asks where to save the ledger card, then writes it off the Swing thread. */
+	private void saveCard(BufferedImage card, String fileName)
+	{
+		LedgerPanel view = panel;
+		List<Filepath> chosen = new Filepath.Chooser()
+			.setIsSave()
+			.setAcceptsFiles()
+			.setDialogTitle("Save ledger card")
+			.addExtensionFilter("PNG image", "png")
+			.setDefaultExtension("png")
+			.setFileName(fileName)
+			.showDialog(view);
+		if (chosen == null || chosen.isEmpty())
+		{
+			return;
+		}
+		Filepath target = chosen.get(0);
+		executor.execute(() ->
+		{
+			String note;
+			try (OutputStream out = target.openOutputStream())
+			{
+				ImageIO.write(card, "png", out);
+				note = "Saved as " + target.getFileName() + ".";
+			}
+			catch (IOException e)
+			{
+				log.warn("Could not save the ledger card", e);
+				note = "The card could not be saved: " + e.getMessage();
+			}
+			String shown = note;
+			LedgerPanel p = panel;
+			if (p != null)
+			{
+				SwingUtilities.invokeLater(() -> p.shareNote(shown));
+			}
+		});
+	}
+
+	private void copyCard(BufferedImage card)
+	{
+		String note;
+		try
+		{
+			Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new ImageTransfer(ImageTransfer.opaque(card)), null);
+			note = "Copied. Paste it anywhere you share pictures.";
+		}
+		catch (IllegalStateException e)
+		{
+			note = "The clipboard is busy, try again in a moment.";
+		}
+		LedgerPanel p = panel;
+		if (p != null)
+		{
+			p.shareNote(note);
+		}
 	}
 }

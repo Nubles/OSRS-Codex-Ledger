@@ -22,6 +22,8 @@ It is the sixth plugin in the **Codex** suite, after [Codex Navigator](https://g
 - **Hoard.** Everything you hold, most valuable first, with each item's share of your worth and (on hover) where it is kept. Items with no Grand Exchange price are named at the bottom, so you know what counts as nothing.
 - **Better alched.** Under the hoard, anything you hold that High Level Alchemy turns into more coins than the Grand Exchange would (after a nature rune and the exchange's tax), with how much more, the casts it takes and the Magic xp. Lines worth less than 10k are left out, and the section is not shown on ironman accounts or below 55 Magic.
 - **What pays.** With [Codex Session Chronicle](https://github.com/Nubles/OSRS-Codex-Session-Chronicle) installed, the Worth page ranks what you spent your sessions on over the last 30 days by net worth gained an hour played: loot, supplies, deaths and prices all count. Sessions under a quarter of an hour are left out.
+- **Milestones.** Each round figure your worth passes while the ledger watches (1M, 5M, 10M and on up to every billion) is struck as a coin on the Worth page, with the day it fell and how long it took from the one before: "Passed 1B, 4 days after 750M". It says how far the next one is, or "back to" a figure you have dropped under.
+- **Share your ledger.** A button on the Worth page draws a statement of account as a picture: your worth in large gilt figures with today, the week and the month, the last 30 days as a line, what your worth is made of, your five most valuable items, your latest milestones, what pays best (with Codex Session Chronicle) and your goal with the day it should fall. Save it as a PNG or copy it to paste anywhere. It is drawn only when you press the button.
 - **Login summary.** A line in the chat box when you log in with your worth, today's change and how much it moved while you were away (prices, finished Grand Exchange offers). It can be turned off.
 - **Plaque.** An optional slim plaque in the game view with your worth and today's change.
 - **Before the first bank visit.** The ledger begins when it first sees your bank. Until then, if you use [Codex Bank Steward](https://github.com/Nubles/OSRS-Codex-Bank-Steward), the crest gives an estimate with Bank Steward's saved copy of your bank at today's prices, marked as an estimate with the copy's age. Nothing in it is booked: the ledger still starts from your real bank.
@@ -30,6 +32,10 @@ It is the sixth plugin in the **Codex** suite, after [Codex Navigator](https://g
   <img src="docs/screenshots/daybook-page.png" width="225" alt="One day">
   <img src="docs/screenshots/worth.png" width="225" alt="Worth, last week">
   <img src="docs/screenshots/plaque.png" alt="Plaque">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/ledger-card.png" width="360" alt="The ledger card">
 </p>
 
 ## How it counts
@@ -52,7 +58,7 @@ The history keeps fine detail for the last two days, a point every three hours f
 
 ## Rules posture
 
-Codex Ledger only reads what the game already shows you: your item containers and Grand Exchange offers, and RuneLite's own item prices. It does not click, change menus, or send anything over the network.
+Codex Ledger only reads what the game already shows you: your item containers and Grand Exchange offers, and RuneLite's own item prices. It does not click, change menus, or send anything over the network. The ledger card is saved only where you choose, through RuneLite's own file dialog.
 
 ## Development
 

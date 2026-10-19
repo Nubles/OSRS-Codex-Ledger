@@ -8,6 +8,7 @@ import com.codex.ledger.core.Deal;
 import com.codex.ledger.core.Earnings;
 import com.codex.ledger.core.Forecast;
 import com.codex.ledger.core.Ledger;
+import com.codex.ledger.core.Milestones;
 import com.codex.ledger.core.Offer;
 import com.codex.ledger.core.Report;
 import com.codex.ledger.core.Store;
@@ -166,6 +167,11 @@ public class LedgerPanel extends PluginPanel
 	private BankCopy.Estimate estimate;
 	/** Asks for a fresh copy of the ledger when the panel opens; null in previews. */
 	private Runnable onOpen;
+	/** Saves and copies the ledger card; null in previews, which then offer no card. */
+	private ShareActions share;
+	/** A line under the card's buttons after saving or copying; cleared when another account opens. */
+	private String shareNote;
+	private String player;
 
 	/**
 	 * Called on the Swing thread whenever the ledger changes.
@@ -175,10 +181,15 @@ public class LedgerPanel extends PluginPanel
 	 */
 	public void update(Ledger ledger, Map<Integer, String> names, String player, State state, long now)
 	{
+		if (!java.util.Objects.equals(this.player, player))
+		{
+			shareNote = null;
+		}
 		this.ledger = ledger;
 		this.names = names;
 		this.state = state;
 		this.now = now;
+		this.player = player;
 		updateCrest(player);
 		if (isShowing())
 		{
@@ -219,6 +230,26 @@ public class LedgerPanel extends PluginPanel
 	public void setGoal(Goal goal)
 	{
 		this.goal = goal;
+	}
+
+	/** What the ledger card's Save and Copy buttons do. */
+	public void setShare(ShareActions share)
+	{
+		this.share = share;
+	}
+
+	/** A line under the ledger card's buttons; the Worth tab is built again to show it. */
+	public void shareNote(String note)
+	{
+		shareNote = note;
+		if (isShowing())
+		{
+			rebuildWorth();
+		}
+		else
+		{
+			stale[WORTH] = true;
+		}
 	}
 
 	/** Called on the Swing thread when the panel opens, so a ledger that changed while it was closed is sent. */
@@ -290,6 +321,12 @@ public class LedgerPanel extends PluginPanel
 		if (e != null)
 		{
 			crest.update(player, ledger.getTotal() + e.getBank(), "Estimate: open your bank", null);
+			return;
+		}
+		if (!ledger.isReady())
+		{
+			// Until the bank is seen the count is only part of the worth; a figure would read as the whole.
+			crest.update(player, null, state == State.LOGGED_OUT ? "Log in and open your bank" : "Open your bank to begin", null);
 			return;
 		}
 		if (state != State.READY)
@@ -422,9 +459,11 @@ public class LedgerPanel extends PluginPanel
 			tiles.add(new StatTile(Format.coins(today.getLow()), "Low", "today", Theme.GOLD));
 			stack.add(tiles);
 			goal(stack);
+			milestones(stack);
 			kinds(stack, report, "today");
 			pays(stack);
 			whereKept(stack);
+			share(stack);
 			replace(worth, stack);
 			return;
 		}
@@ -434,9 +473,11 @@ public class LedgerPanel extends PluginPanel
 			worst == null ? "" : Format.day(LocalDate.parse(worst.getDate())), worst == null ? Theme.TEXT_MUTED : Theme.signed(worst.change())));
 		stack.add(tiles);
 		goal(stack);
+		milestones(stack);
 		kinds(stack, report, RANGE_NOTES[r]);
 		pays(stack);
 		whereKept(stack);
+		share(stack);
 		replace(worth, stack);
 	}
 
@@ -522,6 +563,28 @@ public class LedgerPanel extends PluginPanel
 		stack.add(card);
 	}
 
+	/** The round figures the worth has passed while the ledger watched, newest first, with the time between. */
+	private void milestones(StackPanel stack)
+	{
+		Milestones m = Milestones.of(ledger.getHistory(), ledger.getTotal(), now);
+		if (m.getPassed().isEmpty())
+		{
+			return;
+		}
+		stack.add(new SectionHeader("Milestones", (m.isRegain() ? "back to " : "next ") + Format.coins(m.getNext())));
+		JPanel list = new JPanel(new GridLayout(0, 1, 0, 4));
+		list.setOpaque(false);
+		boolean first = true;
+		for (Milestones.Mark mark : m.getPassed())
+		{
+			list.add(new MilestoneRow(mark, first));
+			first = false;
+		}
+		stack.add(list);
+		stack.add(Ui.wrapped(Format.coins(m.getToGo()) + " to " + Format.coins(m.getNext()) + ". Round figures passed while the ledger watched.",
+			Theme.small(), Theme.TEXT_FAINT, WIDTH - 10));
+	}
+
 	static String forecastText(Forecast f)
 	{
 		if (f.isReached())
@@ -542,7 +605,8 @@ public class LedgerPanel extends PluginPanel
 		{
 			return left + "At " + pace + " it is more than ten years off.";
 		}
-		return left + "At " + pace + ", around " + Format.longDay(f.getEta()) + ".";
+		// The date stays on one line rather than break between its day and its month.
+		return left + "At " + pace + ", around " + Format.longDay(f.getEta()).replace(' ', '\u00a0') + ".";
 	}
 
 	/** Net worth an hour by what the play was spent on, from Session Chronicle's sessions. */
@@ -574,6 +638,60 @@ public class LedgerPanel extends PluginPanel
 		}
 		stack.add(Ui.wrapped("Net worth an hour played, by what Codex Session Chronicle saw each session spent on: loot, supplies used,"
 			+ " deaths and prices all count.", Theme.small(), Theme.TEXT_FAINT, WIDTH - 10));
+	}
+
+	/** The ledger card's buttons; the card itself is drawn only when one is pressed. */
+	private void share(StackPanel stack)
+	{
+		if (share == null || !LedgerCard.canDraw(ledger))
+		{
+			return;
+		}
+		// Ask for the five pictures now, so they have arrived by the time the card is drawn.
+		for (Report.Line l : icons == null ? java.util.Collections.<Report.Line>emptyList() : Report.holdings(ledger, LedgerCard.HELD))
+		{
+			icons.icon(l.getItemId(), null);
+		}
+		stack.add(new SectionHeader("Share your ledger"));
+		Card card = new Card(new BorderLayout(0, 6));
+		card.setBorder(new EmptyBorder(8, 10, 8, 10));
+		card.add(Ui.wrapped("Your worth, the month's line, what you hold and your milestones on a gilt card, ready to post.",
+			Theme.small(), Theme.TEXT_MUTED, WIDTH - 30), BorderLayout.NORTH);
+		JPanel buttons = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+		buttons.setOpaque(false);
+		buttons.add(new CodexButton("Save card", true, this::saveCard));
+		buttons.add(javax.swing.Box.createHorizontalStrut(6));
+		buttons.add(new CodexButton("Copy", false, this::copyCard));
+		card.add(buttons, BorderLayout.CENTER);
+		if (shareNote != null)
+		{
+			card.add(Ui.wrapped(shareNote, Theme.small(), Theme.TEAL, WIDTH - 30), BorderLayout.SOUTH);
+		}
+		stack.add(card);
+	}
+
+	/** The statement as it stands, or null while there is nothing to share. */
+	private LedgerCard.Statement statement()
+	{
+		return LedgerCard.Statement.of(ledger, names, player, today(), now, zone, goal.amount, goal.name, earnings);
+	}
+
+	private void saveCard()
+	{
+		LedgerCard.Statement s = statement();
+		if (s != null && share != null)
+		{
+			share.save(LedgerCard.render(s, icons, null), LedgerCard.fileName(now, zone));
+		}
+	}
+
+	private void copyCard()
+	{
+		LedgerCard.Statement s = statement();
+		if (s != null && share != null)
+		{
+			share.copy(LedgerCard.render(s, icons, null));
+		}
 	}
 
 	private void whereKept(StackPanel stack)
