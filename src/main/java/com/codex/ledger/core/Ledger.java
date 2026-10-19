@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.IntFunction;
-import java.util.function.ToIntFunction;
+import java.util.function.Function;
 
 /**
  * An account's ledger: what it holds in each place, what each item was last worth, the worth
@@ -762,17 +762,21 @@ public final class Ledger
 	 * curve's shape are never given up, so a ledger whose holdings alone pass the budget stays over it,
 	 * and fitting it again on every save takes nothing more away.
 	 *
-	 * @param size the saved size of the ledger as it stands, in characters
-	 * @return the saved size after trimming
+	 * The ledger is measured by its saved form itself, so the last one measured is the one to save:
+	 * it is written out once more only for each step that took something away.
+	 *
+	 * @param json writes the ledger out as it stands
+	 * @param saved the ledger already written out as it stands, or null
+	 * @return the ledger written out after trimming
 	 */
-	public int fit(int budget, ToIntFunction<Ledger> size)
+	public String fit(int budget, Function<Ledger, String> json, String saved)
 	{
-		int now = size.applyAsInt(this);
-		for (int step = 0; now > budget && step < SHRINK_STEPS; step++)
+		String now = saved != null ? saved : json.apply(this);
+		for (int step = 0; now.length() > budget && step < SHRINK_STEPS; step++)
 		{
 			if (shrink(step))
 			{
-				now = size.applyAsInt(this);
+				now = json.apply(this);
 			}
 		}
 		return now;
@@ -834,8 +838,8 @@ public final class Ledger
 		return detail() != before;
 	}
 
-	/** A rough count of the trimmable detail, to tell whether a step took anything. */
-	private int detail()
+	/** A rough count of the trimmable detail, to tell whether a step took anything or the ledger has grown. */
+	int detail()
 	{
 		int n = history.size() + book.size() + days.size();
 		for (Day d : days)

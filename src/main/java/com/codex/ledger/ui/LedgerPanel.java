@@ -157,6 +157,9 @@ public class LedgerPanel extends PluginPanel
 		return scroll;
 	}
 
+	/** Asks for a fresh copy of the ledger when the panel opens; null in previews. */
+	private Runnable onOpen;
+
 	/**
 	 * Called on the Swing thread whenever the ledger changes.
 	 *
@@ -187,9 +190,19 @@ public class LedgerPanel extends PluginPanel
 		this.goal = goal;
 	}
 
+	/** Called on the Swing thread when the panel opens, so a ledger that changed while it was closed is sent. */
+	public void setOnOpen(Runnable onOpen)
+	{
+		this.onOpen = onOpen;
+	}
+
 	@Override
 	public void onActivate()
 	{
+		if (onOpen != null)
+		{
+			onOpen.run();
+		}
 		int tab = tabs.getSelected();
 		if (stale[tab])
 		{

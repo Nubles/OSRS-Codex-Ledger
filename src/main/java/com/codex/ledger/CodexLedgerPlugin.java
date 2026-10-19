@@ -7,6 +7,7 @@ import com.codex.ledger.core.Ledger;
 import com.codex.ledger.core.Offer;
 import com.codex.ledger.core.Report;
 import com.codex.ledger.core.SafeDeath;
+import com.codex.ledger.core.Saver;
 import com.codex.ledger.core.Store;
 import com.codex.ledger.overlay.WorthPlaque;
 import com.codex.ledger.ui.Format;
@@ -81,6 +82,7 @@ public class CodexLedgerPlugin extends Plugin
 	private static final String LEDGER_KEY = "ledger";
 	/** Characters the saved ledger may take before its oldest detail is trimmed; a typical account saves 40-120k. */
 	private static final int SAVE_BUDGET = 200_000;
+	private final Saver saver = new Saver(SAVE_BUDGET);
 	/** Ticks between revaluing what is held, about a minute. */
 	private static final int REVALUE_TICKS = 100;
 	/**
@@ -150,6 +152,8 @@ public class CodexLedgerPlugin extends Plugin
 	private String profile;
 	private Ledger ledger;
 	private boolean dirty;
+	/** The panel was closed when the ledger last changed, so it has not been sent a copy since. */
+	private volatile boolean panelBehind;
 	private boolean unsaved;
 	/** Time logged in counted since the last save, saved with the next change or at the slower pace. */
 	private boolean playUnsaved;
@@ -179,6 +183,13 @@ public class CodexLedgerPlugin extends Plugin
 			return image;
 		};
 		panel = new LedgerPanel(icons);
+		panel.setOnOpen(() ->
+		{
+			if (panelBehind)
+			{
+				clientThread.invoke(this::publish);
+			}
+		});
 		navButton = NavigationButton.builder()
 			.tooltip("Codex Ledger")
 			.icon(Sigil.icon(16))
@@ -569,6 +580,7 @@ public class CodexLedgerPlugin extends Plugin
 			ledger = new Ledger();
 		}
 		ledger.setKinds(this::kind);
+		saver.reset();
 		unsaved = false;
 		playUnsaved = false;
 		dirty = true;
@@ -583,13 +595,8 @@ public class CodexLedgerPlugin extends Plugin
 		}
 		unsaved = false;
 		playUnsaved = false;
-		String json = gson.toJson(ledger);
-		if (json.length() > SAVE_BUDGET)
-		{
-			// A very busy account: give up the oldest detail rather than let the profile grow.
-			ledger.fit(SAVE_BUDGET, l -> gson.toJson(l).length());
-			json = gson.toJson(ledger);
-		}
+		// A very busy account gives up the oldest detail rather than let the profile grow.
+		String json = saver.save(ledger, gson::toJson);
 		configManager.setConfiguration(CodexLedgerConfig.GROUP, profile, LEDGER_KEY, json);
 		return true;
 	}
@@ -634,6 +641,22 @@ public class CodexLedgerPlugin extends Plugin
 			}
 			return;
 		}
+		boolean loggedIn = client.getGameState() == GameState.LOGGED_IN;
+		if (ledger.isReady() && loggedIn)
+		{
+			plaque.show(ledger.getTotal(), Report.of(ledger, 1, Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate(), 0).change());
+		}
+		else
+		{
+			plaque.show(null, 0);
+		}
+		if (target == null || !target.isShowing())
+		{
+			// Copying a big ledger for a closed panel is wasted work on the client thread: it is copied when the panel opens.
+			panelBehind = true;
+			return;
+		}
+		panelBehind = false;
 		Ledger copy = gson.fromJson(gson.toJson(ledger), Ledger.class).repair();
 		for (int id : copy.holdings().keySet())
 		{
@@ -659,27 +682,15 @@ public class CodexLedgerPlugin extends Plugin
 			}
 		}
 		Map<Integer, String> shownNames = new HashMap<>(names);
-		boolean loggedIn = client.getGameState() == GameState.LOGGED_IN;
 		Player player = client.getLocalPlayer();
 		String name = loggedIn && player != null ? player.getName() : null;
 		LedgerPanel.State state = !loggedIn ? LedgerPanel.State.LOGGED_OUT : copy.isReady() ? LedgerPanel.State.READY : LedgerPanel.State.WAITING_FOR_BANK;
-		if (copy.isReady() && loggedIn)
+		LedgerPanel.Goal goal = new LedgerPanel.Goal(Math.max(0, config.goal()) * 1_000_000L, config.goalName());
+		SwingUtilities.invokeLater(() ->
 		{
-			plaque.show(copy.getTotal(), Report.of(copy, 1, Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate(), 0).change());
-		}
-		else
-		{
-			plaque.show(null, 0);
-		}
-		if (target != null)
-		{
-			LedgerPanel.Goal goal = new LedgerPanel.Goal(Math.max(0, config.goal()) * 1_000_000L, config.goalName());
-			SwingUtilities.invokeLater(() ->
-			{
-				target.setGoal(goal);
-				target.update(copy, shownNames, name, state, now);
-			});
-		}
+			target.setGoal(goal);
+			target.update(copy, shownNames, name, state, now);
+		});
 	}
 
 	/** What an item is: coins, gear, supplies or materials. Asked on the client thread while settling. */

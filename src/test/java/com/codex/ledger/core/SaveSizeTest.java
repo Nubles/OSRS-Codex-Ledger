@@ -52,7 +52,7 @@ public class SaveSizeTest
 		Ledger ledger = busyYear();
 		long total = ledger.getTotal();
 		int points = ledger.getHistory().size();
-		int fitted = ledger.fit(120_000, l -> GSON.toJson(l).length());
+		int fitted = ledger.fit(120_000, GSON::toJson, null).length();
 		assertTrue("fitted " + fitted, fitted <= 120_000);
 		assertEquals(fitted, GSON.toJson(ledger).length());
 		JsonObject saved = new JsonParser().parse(GSON.toJson(ledger)).getAsJsonObject();
@@ -66,7 +66,7 @@ public class SaveSizeTest
 		// A ledger already inside its budget is left alone.
 		Ledger small = busy(3);
 		String before = GSON.toJson(small);
-		small.fit(1_000_000, l -> GSON.toJson(l).length());
+		small.fit(1_000_000, GSON::toJson, null);
 		assertEquals(before, GSON.toJson(small));
 	}
 
@@ -80,11 +80,68 @@ public class SaveSizeTest
 		long newest = ledger.getHistory().get(points - 1).getTime();
 		for (int save = 0; save < 12; save++)
 		{
-			ledger.fit(1, l -> GSON.toJson(l).length());
+			ledger.fit(1, GSON::toJson, null);
 		}
 		assertEquals("every day's totals are kept", Ledger.DAYS, ledger.getDays().size());
 		assertEquals(Math.min(points, Ledger.HISTORY_FLOOR), ledger.getHistory().size());
 		assertEquals("the newest point is kept", newest, ledger.getHistory().get(ledger.getHistory().size() - 1).getTime());
+	}
+
+	@Test
+	public void savingAHugeLedgerWritesItOutOnceASave()
+	{
+		// A 9,000-kind bank on top of a busy year: the holdings alone pass the budget, so trimming can
+		// never bring it under. Each save used to write it out three times (up to seven when a trim
+		// step found anything), on the client thread, every save.
+		Ledger ledger = busyYear();
+		Map<Integer, Long> bank = new HashMap<>();
+		for (int i = 0; i < 9_000; i++)
+		{
+			bank.put(30_000 + i, 1L + i);
+		}
+		ledger.observe(Store.BANK, bank);
+		Prices prices = id -> 1_000L + id;
+		long t = ledger.getHistory().get(ledger.getHistory().size() - 1).getTime() + 60_000L;
+		ledger.settle(t, prices, ZoneOffset.UTC);
+		Saver saver = new Saver(200_000);
+		int saves = 40;
+		long started = System.nanoTime();
+		String last = null;
+		for (int save = 0; save < saves; save++)
+		{
+			// A save every five minutes of play, with the worth moving between them.
+			t += 5 * 60_000L;
+			ledger.settle(t, id -> 1_000L + id + (id % 7), ZoneOffset.UTC);
+			last = saver.save(ledger, GSON::toJson);
+		}
+		long ms = (System.nanoTime() - started) / 1_000_000;
+		System.out.println("Huge ledger: " + saves + " saves wrote it out " + saver.getWrites() + " times in " + ms + " ms, "
+			+ last.length() + " characters");
+		assertTrue("writes " + saver.getWrites(), saver.getWrites() <= saves + 2 * 6);
+		assertEquals(GSON.toJson(ledger), last);
+		assertEquals("every day's totals are kept", Ledger.DAYS, ledger.getDays().size());
+	}
+
+	@Test
+	public void aLedgerPastItsBudgetIsTrimmedWithRoomToGrow()
+	{
+		Ledger ledger = busyYear();
+		int natural = GSON.toJson(ledger).length();
+		Saver saver = new Saver(natural - 1_000);
+		String saved = saver.save(ledger, GSON::toJson);
+		assertTrue(saved.length() <= (natural - 1_000) * Saver.ROOM);
+		assertEquals(GSON.toJson(ledger), saved);
+		int writes = saver.getWrites();
+		// The next save has room: it is written out once and not trimmed.
+		saver.save(ledger, GSON::toJson);
+		assertEquals(writes + 1, saver.getWrites());
+
+		// A ledger inside its budget is written once and left alone.
+		Ledger small = busy(3);
+		String before = GSON.toJson(small);
+		Saver roomy = new Saver(1_000_000);
+		assertEquals(before, roomy.save(small, GSON::toJson));
+		assertEquals(1, roomy.getWrites());
 	}
 
 	static Ledger busy(int days)
