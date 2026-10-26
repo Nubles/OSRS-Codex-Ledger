@@ -574,13 +574,20 @@ public class CodexLedgerPlugin extends Plugin
 		}
 		for (Item item : container.getItems())
 		{
-			if (item.getId() < 0 || item.getQuantity() <= 0)
+			// A bank placeholder keeps the item's slot but holds none of it; folded into the item it would count as owned.
+			if (item.getId() < 0 || item.getQuantity() <= 0 || isPlaceholder(item.getId()))
 			{
 				continue;
 			}
 			items.merge(itemManager.canonicalize(item.getId()), (long) item.getQuantity(), Long::sum);
 		}
 		return items;
+	}
+
+	/** True for a bank placeholder: the faded slot an item leaves behind when all of it is taken out. */
+	private boolean isPlaceholder(int itemId)
+	{
+		return itemManager.getItemComposition(itemId).getPlaceholderTemplateId() != -1;
 	}
 
 	/** An offer as the ledger keeps it, or null for an empty slot. */
