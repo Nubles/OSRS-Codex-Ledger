@@ -61,6 +61,10 @@ The ledger is saved per account in your RuneLite profile, every few minutes and 
 
 Codex Ledger only reads what the game already shows you and RuneLite's own item prices. It does not click, change menus, or send anything over the network. The ledger card is saved only where you choose.
 
+## Field notes
+
+An optional setting, **Keep field notes** (under Field notes, off by default), writes a plain record of what Ledger reads and decides to its own folder in `.runelite/plugin-data` on your computer, one line at a time. It is for checking the plugin's guesses against real play: when something looks wrong, the notes show what it saw and why it chose what it did. Other players' chat is never written down, it stays on your computer, and nothing is sent anywhere.
+
 ## Development
 
 ```bash

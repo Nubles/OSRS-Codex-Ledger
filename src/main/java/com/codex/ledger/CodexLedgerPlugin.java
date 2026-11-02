@@ -1,5 +1,6 @@
 package com.codex.ledger;
 
+import com.codex.ledger.notes.FieldNotes;
 import com.codex.ledger.core.Alchemy;
 import com.codex.ledger.core.BankCopy;
 import com.codex.ledger.core.Day;
@@ -160,6 +161,9 @@ public class CodexLedgerPlugin extends Plugin
 	@Inject
 	private CodexLedgerConfig config;
 
+	/** The optional local record of what the plugin read and decided. */
+	private FieldNotes notes;
+
 	@Inject
 	private ScheduledExecutorService executor;
 
@@ -211,6 +215,11 @@ public class CodexLedgerPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
+		notes = new FieldNotes(this::getPluginDirectory, gson);
+		if (config.fieldNotes())
+		{
+			notes.open();
+		}
 		ItemIcons icons = new ItemIcons()
 		{
 			@Override
@@ -286,6 +295,11 @@ public class CodexLedgerPlugin extends Plugin
 	@Override
 	protected void shutDown()
 	{
+		if (notes != null)
+		{
+			notes.shutdown();
+			notes = null;
+		}
 		overlayManager.remove(plaque);
 		clientToolbar.removeNavigation(navButton);
 		// A card still waiting for its pictures is never saved or copied once the plugin is off.
@@ -383,6 +397,18 @@ public class CodexLedgerPlugin extends Plugin
 	@Subscribe
 	public void onConfigChanged(ConfigChanged event)
 	{
+		if (CodexLedgerConfig.GROUP.equals(event.getGroup()) && "fieldNotes".equals(event.getKey()) && notes != null)
+		{
+			if (config.fieldNotes())
+			{
+				notes.open();
+			}
+			else
+			{
+				notes.close();
+			}
+			return;
+		}
 		if (CHRONICLE_GROUP.equals(event.getGroup()))
 		{
 			// Session Chronicle filed a session: what pays may have moved.
@@ -763,6 +789,23 @@ public class CodexLedgerPlugin extends Plugin
 			return;
 		}
 		boolean loggedIn = client.getGameState() == GameState.LOGGED_IN;
+		if (ledger.isReady() && notes.isOpen())
+		{
+			// The worth and where it was read from, so a jump can be traced to the store that caused it.
+			com.google.gson.JsonObject n = new com.google.gson.JsonObject();
+			n.addProperty("total", ledger.getTotal());
+			com.google.gson.JsonObject stores = new com.google.gson.JsonObject();
+			ledger.getStores().forEach((store, holding) ->
+			{
+				com.google.gson.JsonObject h = new com.google.gson.JsonObject();
+				h.addProperty("items", holding.getItems().size());
+				h.addProperty("seen", holding.getSeen());
+				stores.add(String.valueOf(store), h);
+			});
+			n.add("stores", stores);
+			n.addProperty("offers", ledger.getOffers().size());
+			notes.noteChanged("worth", n);
+		}
 		if (ledger.isReady() && loggedIn)
 		{
 			plaque.show(ledger.getTotal(), Report.of(ledger, 1, Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()).toLocalDate(), 0).change());
