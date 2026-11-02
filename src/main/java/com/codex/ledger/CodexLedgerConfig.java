@@ -3,6 +3,7 @@ package com.codex.ledger;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
+import net.runelite.client.config.ConfigSection;
 import net.runelite.client.config.Range;
 
 @ConfigGroup(CodexLedgerConfig.GROUP)
@@ -64,5 +65,25 @@ public interface CodexLedgerConfig extends Config
 	default boolean nameOnCard()
 	{
 		return true;
+	}
+
+	@ConfigSection(
+		name = "Field notes",
+		description = "A local record for checking the plugin's guesses",
+		position = 99,
+		closedByDefault = true
+	)
+	String FIELD_NOTES = "fieldNotesSection";
+
+	@ConfigItem(
+		keyName = "fieldNotes",
+		name = "Keep field notes",
+		description = "Write what Ledger reads and decides to its folder in .runelite/plugin-data on your computer, for checking its guesses; nothing is sent anywhere",
+		section = FIELD_NOTES,
+		position = 0
+	)
+	default boolean fieldNotes()
+	{
+		return false;
 	}
 }
