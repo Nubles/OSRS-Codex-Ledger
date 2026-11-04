@@ -347,7 +347,7 @@ public class DamagedSaveTest
 		// One panel for every save, as the plugin keeps one for every account.
 		panel.setGoal(new LedgerPanel.Goal(2_000_000_000L, "Twisted bow"));
 		panel.update(ledger, names, "Zezima", ledger.isReady() ? LedgerPanel.State.READY : LedgerPanel.State.WAITING_FOR_BANK, NOW);
-		for (int tab = 3; tab >= 0; tab--)
+		for (int tab = 4; tab >= 0; tab--)
 		{
 			panel.showTab(tab);
 			paint(panel);

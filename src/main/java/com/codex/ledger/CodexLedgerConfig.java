@@ -76,4 +76,16 @@ public interface CodexLedgerConfig extends Config
 	{
 		return true;
 	}
+
+	@ConfigItem(
+		keyName = "flipIdleMinutes",
+		name = "Idle slot after (minutes)",
+		description = "On the Flips page, mark an offer that has not traded for this many minutes as idle, so you know to adjust its price; 0 never marks one",
+		position = 6
+	)
+	@Range(min = 0, max = 1440)
+	default int flipIdleMinutes()
+	{
+		return 30;
+	}
 }
