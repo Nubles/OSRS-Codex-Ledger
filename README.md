@@ -8,6 +8,7 @@ It is part of the **Codex** suite and shares its look: warm ink, aged gold and t
   <img src="docs/screenshots/worth.png" width="225" alt="The Worth page">
   <img src="docs/screenshots/daybook.png" width="225" alt="The day book">
   <img src="docs/screenshots/trades.png" width="225" alt="Trades">
+  <img src="docs/screenshots/flips.png" width="225" alt="Flips">
   <img src="docs/screenshots/hoard.png" width="225" alt="Hoard">
 </p>
 
@@ -19,6 +20,7 @@ It is part of the **Codex** suite and shares its look: warm ink, aged gold and t
 - **Milestones.** Each round figure you pass (1M, 5M, 10M and on to every billion) is marked with the day and how long it took from the one before.
 - **Day book** (the Days page). For today, 7 days, 30 days or all time: the change split into *play* and *market*, where the play came from (Exchange, Loot, Supplies, Coins in, Coins out, Deaths), the items that brought most in or took most out, and the biggest price moves. Then a month-by-month statement and a page for every day; click a page to open it.
 - **Trades.** Every Grand Exchange trade with its profit after the 2% tax, your return on cost, and what you still hold from your buys with what it would fetch now. Items sold that the ledger never saw you buy are named, with no profit made up for them.
+- **Flips.** A flipping book kept from your own offers. Every Grand Exchange slot is watched as it trades, partial fills and all; each sale is matched to your oldest unsold buys of the item into a realised flip with its profit after tax, margin an item and how long you held. Each slot shows how long it has stood since its last trade (lit in ember once idle past your mark, 30 minutes by default), each item's buy and sell prices are drawn as two threads so you can watch the margin move, and what you bought but have not sold is valued apart, as market, never as flip profit. Offers keep trading while you are logged out and can be handled from another device: what moved is read at your next login and marked *seen late* (amounts exact, the time only known to lie between your log out and that login), and an offer that left its slot part way through while you were away is named, with no guess at what it did after.
 - **Hoard.** Everything you hold, most valuable first, with its share of your worth, and anything that High Level Alchemy turns into more coins than selling would (not shown for ironmen or below 55 Magic).
 - **Ledger card.** A button on the Worth page draws your statement as a picture to save as a PNG or copy and paste anywhere.
 - **Login summary** in the chat box, and an optional **plaque** in the game view with your worth and today's change.
@@ -44,6 +46,7 @@ It is part of the **Codex** suite and shares its look: warm ink, aged gold and t
 | Goal name | What the goal is for, shown with it on the Worth page and the card. |
 | Name on cards | Writes your character's name on the ledger card. Turn it off to share the card without it. |
 | Forecast Gear Roadmap's goal | When Codex Gear Roadmap is installed, the forecast aims at its savings goal. On by default. |
+| Idle slot after (minutes) | On the Flips page, an offer that has not traded for this long is marked idle. 30 by default; 0 never marks one. |
 
 ## With other Codex plugins
 
@@ -64,6 +67,8 @@ Each calendar day of the last 30 adds a change to your worth (play plus market; 
 The ledger begins the first time you open your bank. Each place is remembered as last seen: the bank whenever it is open, the inventory, gear and rune pouch all the time, the seed vault and looting bag when you open them, and the Grand Exchange from your offers. Changes are settled once a game tick, so moving items between places is never a gain or a loss. Items are valued at RuneLite's item price; items with no price count as nothing. About once a minute everything is revalued and the difference is booked as *market*.
 
 Deaths are booked to the death, less what you get back from the gravestone or Death within the hour; safe deaths (raids, Inferno, Fight Caves, Colosseum and the safe minigames) take nothing. Places the game does not show (POH storage, STASH units, item sacks) are not counted, so putting items there shows as gold going out.
+
+The flips book is saved per account under its own key (`flipBook`), apart from the ledger, so a ledger saved before it reads exactly as it did. It keeps the last 400 flips and the last 16 prices of each item. It begins the first time you log in with it: offers already in your slots then are taken as they stand, and only what they trade from there on is counted.
 
 The ledger is saved per account in your RuneLite profile, every few minutes and when you log out, and kept under about 200 KB by thinning the oldest detail. A save damaged in part keeps everything that can still be read, and any save that could not be read whole, or holds fields only a later version knows, is first copied aside (one copy, under `ledgerUnreadable`) so the next save never writes over the only copy.
 

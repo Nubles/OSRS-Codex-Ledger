@@ -6,6 +6,7 @@ import com.codex.ledger.core.Channel;
 import com.codex.ledger.core.Day;
 import com.codex.ledger.core.Deal;
 import com.codex.ledger.core.Earnings;
+import com.codex.ledger.core.FlipBook;
 import com.codex.ledger.core.Forecast;
 import com.codex.ledger.core.Ledger;
 import com.codex.ledger.core.Milestones;
@@ -39,18 +40,19 @@ import javax.swing.border.EmptyBorder;
 import net.runelite.client.ui.PluginPanel;
 
 /**
- * The Ledger side panel: the crest, then four pages. Worth is the line of the account's worth
+ * The Ledger side panel: the crest, then five pages. Worth is the line of the account's worth
  * over time, where it is kept and where it is heading; Day book is where the gold came from and
- * went; Trades is what trading on the Grand Exchange made after tax; and Hoard is everything held,
- * most valuable first.
+ * went; Trades is what trading on the Grand Exchange made after tax; Flips is each sale matched to
+ * its buys, the slots' clocks and each item's margin; and Hoard is everything held, most valuable first.
  */
 public class LedgerPanel extends PluginPanel
 {
 	static final int WIDTH = 200;
-	private static final String[] TABS = {"worth", "daybook", "trades", "hoard"};
+	private static final String[] TABS = {"worth", "daybook", "trades", "flips", "hoard"};
 	private static final int WORTH = 0;
 	private static final int DAYBOOK = 1;
 	private static final int TRADES = 2;
+	private static final int FLIPS = 3;
 	private static final String[] RANGES = {"Day", "Week", "Month", "Year", "All"};
 	private static final long[] RANGE_MS = {86_400_000L, 7 * 86_400_000L, 30 * 86_400_000L, 365 * 86_400_000L, 0};
 	private static final int[] RANGE_DAYS = {1, 7, 30, 365, 0};
@@ -112,15 +114,17 @@ public class LedgerPanel extends PluginPanel
 
 	private final ItemIcons icons;
 	private final Crest crest = new Crest();
-	private final Segmented tabs = new Segmented(true, "Worth", "Days", "Trades", "Hoard");
+	private final Segmented tabs = new Segmented(true, "Worth", "Days", "Trades", "Flips", "Hoard");
 	private final Segmented range = new Segmented(false, RANGES);
 	private final Segmented span = new Segmented(false, SPANS);
 	private final Segmented tradeSpan = new Segmented(false, SPANS);
+	private final Segmented flipSpan = new Segmented(false, SPANS);
 	private final CardLayout cards = new CardLayout();
 	private final JPanel content = new JPanel(cards);
 	private final JScrollPane worth = scroller();
 	private final JScrollPane daybook = scroller();
 	private final JScrollPane trades = scroller();
+	private final JScrollPane flipsPage = scroller();
 	private final JScrollPane hoard = scroller();
 	private Goal goal = new Goal(0, "");
 	private GearGoal gearGoal;
@@ -134,7 +138,7 @@ public class LedgerPanel extends PluginPanel
 	private int pagesShown = PAGES;
 	private final int[] chartPointer = {-1};
 	/** Tabs whose content is out of date; a hidden tab is only rebuilt when it is next shown. */
-	private final boolean[] stale = {true, true, true, true};
+	private final boolean[] stale = {true, true, true, true, true};
 
 	public LedgerPanel(ItemIcons icons)
 	{
@@ -157,7 +161,8 @@ public class LedgerPanel extends PluginPanel
 		content.add(worth, TABS[0]);
 		content.add(daybook, TABS[1]);
 		content.add(trades, TABS[2]);
-		content.add(hoard, TABS[3]);
+		content.add(flipsPage, TABS[3]);
+		content.add(hoard, TABS[4]);
 		add(content, BorderLayout.CENTER);
 
 		tabs.onChange(this::showTab);
@@ -175,6 +180,8 @@ public class LedgerPanel extends PluginPanel
 		});
 		tradeSpan.setSelected(1, false);
 		tradeSpan.onChange(i -> rebuildTrades());
+		flipSpan.setSelected(1, false);
+		flipSpan.onChange(i -> rebuildFlips());
 		rebuild();
 	}
 
@@ -192,6 +199,9 @@ public class LedgerPanel extends PluginPanel
 
 	private Alchemy alchemy;
 	private Earnings earnings;
+	/** The flips book, or null before an account is open. */
+	private FlipBook flips;
+	private int idleMinutes = 30;
 	/** Codex Bank Steward's copy of the bank, priced, while the ledger waits for the real one; null otherwise. */
 	private BankCopy.Estimate estimate;
 	/** Asks for a fresh copy of the ledger when the panel opens; null in previews. */
@@ -339,6 +349,25 @@ public class LedgerPanel extends PluginPanel
 		rebuildWorth();
 	}
 
+	/**
+	 * The flips book to show, a copy the panel may keep, or null; shown at the next rebuild.
+	 *
+	 * @param idleMinutes an offer standing still this long is marked idle; 0 never marks one
+	 */
+	public void setFlips(FlipBook flips, int idleMinutes)
+	{
+		this.flips = flips;
+		this.idleMinutes = idleMinutes;
+		stale[FLIPS] = true;
+	}
+
+	/** Picks the flips page's span, for previews and tests. */
+	public void showFlipSpan(int index)
+	{
+		flipSpan.setSelected(index, false);
+		rebuildFlips();
+	}
+
 	/** Picks the trades page's span, for previews and tests. */
 	public void showTradeSpan(int index)
 	{
@@ -413,6 +442,10 @@ public class LedgerPanel extends PluginPanel
 		else if (tab == TRADES)
 		{
 			rebuildTrades();
+		}
+		else if (tab == FLIPS)
+		{
+			rebuildFlips();
 		}
 		else
 		{
@@ -1413,6 +1446,19 @@ public class LedgerPanel extends PluginPanel
 			tip.append(' ').append(Format.whole(d.getUnmatched())).append(" of them were never bought here.");
 		}
 		return tip.toString().trim();
+	}
+
+	// The Flips tab: see FlipsPage.
+
+	private void rebuildFlips()
+	{
+		StackPanel stack = new StackPanel(8, 8);
+		stack.add(flipSpan);
+		int s = flipSpan.getSelected();
+		long from = SPAN_DAYS[s] <= 0 ? 0 : today().minusDays(SPAN_DAYS[s] - 1).atStartOfDay(zone).toInstant().toEpochMilli();
+		String title = s == 0 ? "Flips today" : s == 3 ? "Every flip" : "Flips, last " + SPANS[s];
+		FlipsPage.build(stack, flips, ledger, names, icons, now, from, title, idleMinutes);
+		replace(flipsPage, stack);
 	}
 
 	// The Hoard tab.

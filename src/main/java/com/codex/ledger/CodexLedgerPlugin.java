@@ -5,6 +5,7 @@ import com.codex.ledger.core.BankCopy;
 import com.codex.ledger.core.Day;
 import com.codex.ledger.core.GearGoalReader;
 import com.codex.ledger.core.Earnings;
+import com.codex.ledger.core.FlipBook;
 import com.codex.ledger.core.Kind;
 import com.codex.ledger.core.Kinds;
 import com.codex.ledger.core.Ledger;
@@ -97,6 +98,9 @@ public class CodexLedgerPlugin extends Plugin
 	private static final String LEDGER_KEY = "ledger";
 	/** Where a save that could not be read at all is set aside, untouched, before the ledger starts afresh. */
 	static final String DAMAGED_KEY = "ledgerUnreadable";
+	/** The flips book, saved apart from the ledger so a ledger from before it reads exactly as it did. */
+	static final String FLIPS_KEY = "flipBook";
+	static final String FLIPS_DAMAGED_KEY = "flipBookUnreadable";
 	/** Characters the saved ledger may take before its oldest detail is trimmed; a typical account saves 40-120k. */
 	private static final int SAVE_BUDGET = 200_000;
 	/** Codex Session Chronicle's group and journal key, read and never written, for what pays. */
@@ -180,6 +184,8 @@ public class CodexLedgerPlugin extends Plugin
 
 	private String profile;
 	private Ledger ledger;
+	private FlipBook flips;
+	private boolean flipsUnsaved;
 	private boolean dirty;
 	/** The panel was closed when the ledger last changed, so it has not been sent a copy since. */
 	private volatile boolean panelBehind;
@@ -297,6 +303,7 @@ public class CodexLedgerPlugin extends Plugin
 		{
 			save();
 			ledger = null;
+			flips = null;
 			profile = null;
 			chronicle = Collections.emptyList();
 			bankCopy = null;
@@ -362,6 +369,8 @@ public class CodexLedgerPlugin extends Plugin
 			{
 				fromLoginScreen = true;
 				summaryDue = false;
+				// The moment the slots stopped being watched is kept, so the next login knows how long they went unseen.
+				flipsUnsaved |= flips != null;
 				save();
 				dirty = true;
 				publish();
@@ -430,7 +439,7 @@ public class CodexLedgerPlugin extends Plugin
 		{
 			plaque.setEnabled(config.showPlaque());
 			if ("goal".equals(event.getKey()) || "goalName".equals(event.getKey()) || "nameOnCard".equals(event.getKey())
-				|| "gearRoadmapGoal".equals(event.getKey()))
+				|| "gearRoadmapGoal".equals(event.getKey()) || "flipIdleMinutes".equals(event.getKey()))
 			{
 				clientThread.invokeLater(this::publish);
 			}
@@ -463,7 +472,13 @@ public class CodexLedgerPlugin extends Plugin
 			// Until the offers are read whole after login, a single slot could look like a collection.
 			return;
 		}
-		ledger.offer(slot, offer(event.getOffer()));
+		Offer offer = offer(event.getOffer());
+		ledger.offer(slot, offer);
+		if (flips != null && flips.offer(slot, offer, System.currentTimeMillis()))
+		{
+			flipsUnsaved = true;
+			dirty = true;
+		}
 	}
 
 	@Subscribe
@@ -520,6 +535,11 @@ public class CodexLedgerPlugin extends Plugin
 			}
 			observeAll();
 		}
+		if (flips != null)
+		{
+			// Watched now: a read after a world hop is not time away.
+			flips.watching(System.currentTimeMillis());
+		}
 		if (pouchChanged)
 		{
 			pouchChanged = false;
@@ -541,13 +561,19 @@ public class CodexLedgerPlugin extends Plugin
 				dirty = true;
 				unsaved = true;
 			}
+			// Only straight after a settle are the holdings whole: what was bought and has since gone some other way leaves its lot.
+			if (flips != null && ledger.isReady() && !ledger.hasPending() && flips.holdAtMost(ledger.holdings()))
+			{
+				flipsUnsaved = true;
+				dirty = true;
+			}
 		}
 		if (summaryDue && loggedInTicks >= SUMMARY_TICKS)
 		{
 			summaryDue = false;
 			summary();
 		}
-		if (unsaved && ticks % SAVE_TICKS == 0 || playUnsaved && ticks % PLAY_SAVE_TICKS == 0)
+		if ((unsaved || flipsUnsaved) && ticks % SAVE_TICKS == 0 || playUnsaved && ticks % PLAY_SAVE_TICKS == 0)
 		{
 			save();
 		}
@@ -679,9 +705,16 @@ public class CodexLedgerPlugin extends Plugin
 		}
 		ledger.observe(Store.RUNE_POUCH, runePouch());
 		GrandExchangeOffer[] offers = client.getGrandExchangeOffers();
+		Offer[] read = new Offer[GE_SLOTS];
 		for (int i = 0; i < GE_SLOTS; i++)
 		{
-			ledger.offer(i, offers != null && i < offers.length ? offer(offers[i]) : null);
+			read[i] = offers != null && i < offers.length ? offer(offers[i]) : null;
+			ledger.offer(i, read[i]);
+		}
+		// Anything that moved while the slots were not watched (logged out, or traded from another device) is booked as seen late.
+		if (flips != null && flips.read(read, System.currentTimeMillis()))
+		{
+			flipsUnsaved = true;
 		}
 	}
 
@@ -689,6 +722,8 @@ public class CodexLedgerPlugin extends Plugin
 	{
 		profile = configManager.getRSProfileKey();
 		ledger = null;
+		flips = null;
+		flipsUnsaved = false;
 		chronicle = Collections.emptyList();
 		bankCopy = null;
 		estimate = null;
@@ -716,6 +751,7 @@ public class CodexLedgerPlugin extends Plugin
 			ledger = new Ledger();
 		}
 		ledger.setKinds(this::kind);
+		loadFlips();
 		saver.reset();
 		readChronicle();
 		readBankCopy();
@@ -725,12 +761,39 @@ public class CodexLedgerPlugin extends Plugin
 		dirty = true;
 	}
 
+	/** Reads this account's flips book, setting aside (once) a save that cannot be read rather than writing over it. */
+	private void loadFlips()
+	{
+		String saved = configManager.getRSProfileConfiguration(CodexLedgerConfig.GROUP, FLIPS_KEY);
+		flips = FlipBook.read(gson, saved);
+		if (flips == null && saved != null && !saved.trim().isEmpty())
+		{
+			String kept = configManager.getRSProfileConfiguration(CodexLedgerConfig.GROUP, FLIPS_DAMAGED_KEY);
+			if (Ledger.setAside(kept, saved))
+			{
+				log.warn("The saved flips book could not be read; it is kept as it was as {}", FLIPS_DAMAGED_KEY);
+				configManager.setConfiguration(CodexLedgerConfig.GROUP, profile, FLIPS_DAMAGED_KEY, saved);
+			}
+		}
+		if (flips == null)
+		{
+			flips = new FlipBook();
+		}
+	}
+
 	/** Writes the ledger to the profile if it changed, time logged in included, and says whether it did. */
 	private boolean save()
 	{
+		boolean wrote = false;
+		if (profile != null && flips != null && flipsUnsaved)
+		{
+			flipsUnsaved = false;
+			configManager.setConfiguration(CodexLedgerConfig.GROUP, profile, FLIPS_KEY, gson.toJson(flips));
+			wrote = true;
+		}
 		if (profile == null || ledger == null || !unsaved && !playUnsaved)
 		{
-			return false;
+			return wrote;
 		}
 		unsaved = false;
 		playUnsaved = false;
@@ -809,6 +872,16 @@ public class CodexLedgerPlugin extends Plugin
 		{
 			name(id);
 		}
+		FlipBook flipsCopy = flips == null ? null : gson.fromJson(gson.toJson(flips), FlipBook.class).repair();
+		if (flipsCopy != null)
+		{
+			flipsCopy.getSlots().values().forEach(s -> name(s.getItem()));
+			flipsCopy.getLots().keySet().forEach(this::name);
+			flipsCopy.getFlips().forEach(f -> name(f.getItem()));
+			flipsCopy.getMarks().keySet().forEach(this::name);
+			flipsCopy.getUnseen().forEach(u -> name(u.getItem()));
+		}
+		int idleMinutes = Math.max(0, config.flipIdleMinutes());
 		for (Day day : copy.getDays())
 		{
 			for (int id : day.getItems().keySet())
@@ -852,6 +925,7 @@ public class CodexLedgerPlugin extends Plugin
 			target.setAlchemy(alchemy);
 			target.setEarnings(earnings);
 			target.setEstimate(guess);
+			target.setFlips(flipsCopy, idleMinutes);
 			target.update(copy, shownNames, name, state, now);
 		});
 	}
