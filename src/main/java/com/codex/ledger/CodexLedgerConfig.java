@@ -65,4 +65,15 @@ public interface CodexLedgerConfig extends Config
 	{
 		return true;
 	}
+
+	@ConfigItem(
+		keyName = "gearRoadmapGoal",
+		name = "Forecast Gear Roadmap's goal",
+		description = "When Codex Gear Roadmap is installed, forecast the day you can afford the savings goal picked there",
+		position = 5
+	)
+	default boolean gearRoadmapGoal()
+	{
+		return true;
+	}
 }
