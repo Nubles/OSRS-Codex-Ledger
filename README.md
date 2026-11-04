@@ -15,6 +15,7 @@ It is part of the **Codex** suite and shares its look: warm ink, aged gold and t
 
 - **Worth.** Your net worth in large figures with today's, this week's and this month's change, and a chart for the last day, week, month, year or all time (hover it to read any moment). Below it: what your play made and what prices did, gold per hour logged in, your best and worst day, what your worth is made of (coins, gear, supplies, materials), where it is kept, and each Grand Exchange offer.
 - **Goal.** Set a worth to aim for (a Twisted bow, say) and the Worth page shows how far along you are and the day you should get there at your last 30 days' pace. With no goal it aims at the next round figure.
+- **Forecast.** Where your worth is heading, and how sure that is. From the last 30 days of the day book (days off included, as the nothing they added) it draws the trend ahead as a dashed line inside an 80% band that widens the further it looks, gives the day you reach your target with the band's earliest and latest ("Around Wed 2 Dec; likely between Fri 20 Nov and Sun 10 Jan 2027"), and says what drove it: play against market, the biggest sources (Loot, Supplies, Deaths...), the items that brought most in or took most out, and your best and worst days. When one lucky day carries the trend it says so, with the trend without it. The target is the savings goal picked in **Codex Gear Roadmap** when there is one (the day your worth has grown by what your coins are short of its price), then the goal in the settings, else the next round figure. Under 7 days of history it says there is not enough to tell a trend from luck, rather than draw one.
 - **Milestones.** Each round figure you pass (1M, 5M, 10M and on to every billion) is marked with the day and how long it took from the one before.
 - **Day book** (the Days page). For today, 7 days, 30 days or all time: the change split into *play* and *market*, where the play came from (Exchange, Loot, Supplies, Coins in, Coins out, Deaths), the items that brought most in or took most out, and the biggest price moves. Then a month-by-month statement and a page for every day; click a page to open it.
 - **Trades.** Every Grand Exchange trade with its profit after the 2% tax, your return on cost, and what you still hold from your buys with what it would fetch now. Items sold that the ledger never saw you buy are named, with no profit made up for them.
@@ -24,6 +25,9 @@ It is part of the **Codex** suite and shares its look: warm ink, aged gold and t
 
 <p align="center">
   <img src="docs/screenshots/ledger-card.png" width="360" alt="The ledger card">
+</p>
+<p align="center">
+  <img src="docs/screenshots/forecast.png" width="225" alt="The forecast">
 </p>
 <p align="center">
   <img src="docs/screenshots/waiting.png" width="225" alt="Before the first bank visit">
@@ -39,15 +43,21 @@ It is part of the **Codex** suite and shares its look: warm ink, aged gold and t
 | Worth goal (millions) | A worth to aim for, in millions: 1500 is 1.5B. 0 aims at the next round figure. |
 | Goal name | What the goal is for, shown with it on the Worth page and the card. |
 | Name on cards | Writes your character's name on the ledger card. Turn it off to share the card without it. |
+| Forecast Gear Roadmap's goal | When Codex Gear Roadmap is installed, the forecast aims at its savings goal. On by default. |
 
 ## With other Codex plugins
 
 Codex Ledger works on its own. If you also use these, it reads (never writes) what they save:
 
 - **[Codex Session Chronicle](https://github.com/Nubles/OSRS-Codex-Session-Chronicle)**: its journal of sessions, so the Worth page can show **What pays**, your activities over the last 30 days ranked by net worth gained an hour played.
+- **[Codex Gear Roadmap](https://github.com/Nubles/OSRS-Codex-Gear-Roadmap)**: its savings goal (`codexgearroadmap.goal`), priced at today's prices for the pieces you do not hold, so the forecast can say when you can afford it. Not for ironmen, who cannot buy it.
 - **[Codex Bank Steward](https://github.com/Nubles/OSRS-Codex-Bank-Steward)**: its saved copy of your bank, so before the ledger has seen your bank it can show an estimate, clearly marked as one. Nothing in it is booked.
 
 Codex Annals, Gear Roadmap, Session Chronicle and Guardian read the worth this plugin saves.
+
+### How the forecast is worked out
+
+Each calendar day of the last 30 adds a change to your worth (play plus market; a day you did not play adds nothing). The trend is their average, the same pace the goal uses, so the two dates agree. The band is where 80% of outcomes would fall if the days ahead are like the days behind: it widens with the square root of the days ahead for the day-to-day swings, plus a straight-line part for not knowing the average exactly, using Student's t for a short history. The band was checked on thousands of made-up accounts whose true drift was known: their real worth fell inside it about 80 times in 100, one day, two weeks and six weeks ahead.
 
 ## How it counts
 

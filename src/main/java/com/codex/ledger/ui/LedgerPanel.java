@@ -11,6 +11,7 @@ import com.codex.ledger.core.Ledger;
 import com.codex.ledger.core.Milestones;
 import com.codex.ledger.core.Months;
 import com.codex.ledger.core.Offer;
+import com.codex.ledger.core.Projection;
 import com.codex.ledger.core.Report;
 import com.codex.ledger.core.Store;
 import com.codex.ledger.core.Trades;
@@ -77,6 +78,30 @@ public class LedgerPanel extends PluginPanel
 		}
 	}
 
+	/**
+	 * Codex Gear Roadmap's savings goal: the upgrade's name, its price at today's prices for the pieces not
+	 * owned, and the coins held. Buying it turns coins into gear, so it is in reach when the worth has grown
+	 * by what the coins are short of the price.
+	 */
+	public static final class GearGoal
+	{
+		final String name;
+		final long price;
+		final long coins;
+
+		public GearGoal(String name, long price, long coins)
+		{
+			this.name = name == null ? "" : name.trim();
+			this.price = Math.max(0, price);
+			this.coins = Math.max(0, coins);
+		}
+
+		long getShort()
+		{
+			return Math.max(0, price - coins);
+		}
+	}
+
 	/** What the panel has to show. */
 	public enum State
 	{
@@ -98,6 +123,7 @@ public class LedgerPanel extends PluginPanel
 	private final JScrollPane trades = scroller();
 	private final JScrollPane hoard = scroller();
 	private Goal goal = new Goal(0, "");
+	private GearGoal gearGoal;
 
 	private Ledger ledger;
 	private Map<Integer, String> names = Collections.emptyMap();
@@ -234,6 +260,12 @@ public class LedgerPanel extends PluginPanel
 	public void setGoal(Goal goal)
 	{
 		this.goal = goal;
+	}
+
+	/** Gear Roadmap's savings goal, priced, or null; shown at the next rebuild. */
+	public void setGearGoal(GearGoal gearGoal)
+	{
+		this.gearGoal = gearGoal;
 	}
 
 	/** Whether the ledger card carries the character's name, from the settings; used when the card is next drawn. */
@@ -475,6 +507,7 @@ public class LedgerPanel extends PluginPanel
 			tiles.add(new StatTile(Format.coins(today.getLow()), "Low", "today", Theme.GOLD));
 			stack.add(tiles);
 			goal(stack);
+			forecast(stack);
 			milestones(stack);
 			kinds(stack, report, "today");
 			pays(stack);
@@ -489,6 +522,7 @@ public class LedgerPanel extends PluginPanel
 			worst == null ? "" : Format.day(LocalDate.parse(worst.getDate())), worst == null ? Theme.TEXT_MUTED : Theme.signed(worst.change())));
 		stack.add(tiles);
 		goal(stack);
+		forecast(stack);
 		milestones(stack);
 		kinds(stack, report, RANGE_NOTES[r]);
 		pays(stack);
@@ -577,6 +611,209 @@ public class LedgerPanel extends PluginPanel
 		card.setToolTipText("The pace is your worth's change over the last " + Forecast.WINDOW
 			+ " days, spread over every day, days off included. Set a goal in the plugin's settings.");
 		stack.add(card);
+	}
+
+	/** A worth to forecast the day of, with what it is. */
+	static final class Aim
+	{
+		final String name;
+		final String note;
+		final long worth;
+		/** A round figure the player picked, written by its name ("150M"); a price is written as coins. */
+		final boolean round;
+
+		Aim(String name, String note, long worth, boolean round)
+		{
+			this.name = name;
+			this.note = note;
+			this.worth = worth;
+			this.round = round;
+		}
+
+		String figure()
+		{
+			return round ? Format.mark(worth) : Format.coins(worth);
+		}
+	}
+
+	/** What the forecast aims at: Gear Roadmap's goal, then the goal from the settings, else the next round figure. */
+	List<Aim> aims()
+	{
+		List<Aim> aims = new ArrayList<>();
+		long total = ledger.getTotal();
+		if (gearGoal != null && gearGoal.price > 0)
+		{
+			aims.add(new Aim(gearGoal.name.isEmpty() ? "Gear Roadmap goal" : gearGoal.name,
+				gearGoal.getShort() <= 0 ? "Gear Roadmap goal: your coins cover it"
+					: "Gear Roadmap goal: " + Format.coins(gearGoal.getShort()) + " more than your coins",
+				total + gearGoal.getShort(), false));
+		}
+		Forecast f = Forecast.of(ledger, today(), goal.amount);
+		if (f.isGoalSet())
+		{
+			aims.add(new Aim(goal.name.isEmpty() ? "Your goal" : goal.name, "Worth of " + Format.mark(f.getTarget()), f.getTarget(), true));
+		}
+		else if (aims.isEmpty())
+		{
+			aims.add(new Aim("Next mark", "Worth of " + Format.mark(f.getTarget()), f.getTarget(), true));
+		}
+		return aims;
+	}
+
+	/** The worth forecast: the trend with its band, the day each aim falls, and what drove the trend. */
+	private void forecast(StackPanel stack)
+	{
+		Projection p = Projection.of(ledger, today());
+		stack.add(new SectionHeader("Forecast", p.hasTrend() ? "80% band" : ""));
+		if (!p.hasTrend())
+		{
+			int more = Projection.MIN_DAYS - p.getDays();
+			stack.add(note("Not enough history yet", "A forecast needs " + Projection.MIN_DAYS + " days of the day book to tell a trend "
+				+ "from luck; this account has " + Format.plural(Math.max(0, p.getDays()), "day") + ". Check back in "
+				+ Format.plural(more, "day") + "."));
+			return;
+		}
+		List<Aim> aims = aims();
+		Aim main = aims.get(0);
+		Projection.Eta mainEta = p.eta(main.worth);
+		int ahead = ForecastChart.ahead(p, mainEta);
+		Card chart = new Card(new BorderLayout(0, 6));
+		chart.setBorder(new EmptyBorder(8, 8, 6, 8));
+		chart.add(new ForecastChart(p, ahead, main.worth > ledger.getTotal() ? main.worth : null, main.figure()), BorderLayout.CENTER);
+		chart.add(Ui.wrapped(trendText(p, ahead), Theme.small(), Theme.TEXT_MUTED, WIDTH - 30), BorderLayout.SOUTH);
+		chart.setToolTipText("Each calendar day's change over the last " + p.getDays() + " days, days off included. The central "
+			+ "line is their average; the band holds 80% of where the worth may stand, widening for the day-to-day swings and "
+			+ "for not knowing the average exactly.");
+		stack.add(chart);
+
+		JPanel list = new JPanel(new GridLayout(0, 1, 0, 4));
+		list.setOpaque(false);
+		for (Aim aim : aims)
+		{
+			Card card = new Card(new BorderLayout(6, 2));
+			card.accent(Theme.GREEN);
+			JPanel head = new JPanel(new BorderLayout(6, 0));
+			head.setOpaque(false);
+			head.add(Ui.label(aim.name, Theme.body(), Theme.GOLD_BRIGHT), BorderLayout.CENTER);
+			head.add(Ui.label(aim.figure(), Theme.body(), Theme.GREEN), BorderLayout.EAST);
+			card.add(head, BorderLayout.NORTH);
+			card.add(Ui.wrapped(aim.note + ". " + etaText(p, p.eta(aim.worth)), Theme.small(), Theme.TEXT_MUTED, WIDTH - 30),
+				BorderLayout.CENTER);
+			list.add(card);
+		}
+		stack.add(list);
+		drivers(stack, p);
+	}
+
+	static String trendText(Projection p, int ahead)
+	{
+		String trend = "Trend " + Format.signed(Math.round(p.getDrift())) + " a day over " + p.getDays() + " days, give or take "
+			+ Format.coins(Math.round(p.getDriftError())) + ". ";
+		return trend + "In " + ahead + " days: " + Format.coins(p.low(ahead)) + " to " + Format.coins(p.high(ahead))
+			+ ", most likely " + Format.coins(p.mean(ahead)) + ".";
+	}
+
+	static String etaText(Projection p, Projection.Eta eta)
+	{
+		Integer c = eta.getCentral();
+		if (c != null && c == 0)
+		{
+			return "Reached.";
+		}
+		String early = eta.getEarly() == null ? null : day(p, eta.getEarly());
+		String late = eta.getLate() == null ? null : day(p, eta.getLate());
+		if (c == null)
+		{
+			return early == null ? "Not within ten years at this trend."
+				: "Not getting closer at this trend; a lucky run could get there by " + early + ".";
+		}
+		String around = "Around " + day(p, c);
+		if (late == null)
+		{
+			return around + ", but the band cannot promise it: the trend may yet turn.";
+		}
+		return early.equals(late) ? around + "." : around + "; likely between " + early + " and " + late + ".";
+	}
+
+	/** A day ahead of the forecast's today, kept on one line: "Wed 2 Dec", with the year when it is another. */
+	private static String day(Projection p, int ahead)
+	{
+		LocalDate d = p.getToday().plusDays(ahead);
+		String s = Format.day(d) + (d.getYear() != p.getToday().getYear() ? " " + d.getYear() : "");
+		return s.replace(' ', '\u00a0');
+	}
+
+	/** What moved the worth over the forecast's days: play and market, the biggest sources, items and days. */
+	private void drivers(StackPanel stack, Projection p)
+	{
+		Report report = Report.of(ledger, p.getDays(), today(), 2);
+		Card card = new Card(new BorderLayout(0, 4));
+		JPanel rows = new JPanel(new GridLayout(0, 1, 0, 1));
+		rows.setOpaque(false);
+		rows.add(Ui.label("WHAT DRIVES IT", Theme.small(), Theme.TEXT_FAINT));
+		rows.add(driverRow("Play", report.getPlay(), Theme.signed(report.getPlay())));
+		rows.add(driverRow("Market", report.getMarket(), report.getMarket() >= 0 ? Theme.MARKET : Theme.EMBER));
+		List<Channel> channels = new ArrayList<>(java.util.Arrays.asList(Channel.values()));
+		channels.removeIf(c -> report.channel(c) == 0);
+		channels.sort((a, b) -> Long.compare(Math.abs(report.channel(b)), Math.abs(report.channel(a))));
+		for (Channel c : channels.subList(0, Math.min(3, channels.size())))
+		{
+			rows.add(driverRow("  " + c.getLabel(), report.channel(c), Theme.signed(report.channel(c))));
+		}
+		for (Integer i : p.biggestDays(2))
+		{
+			long change = p.change(i);
+			rows.add(driverRow((change >= 0 ? "Best day " : "Worst day ") + Format.day(p.getFrom().plusDays(i)), change, Theme.signed(change)));
+		}
+		card.add(rows, BorderLayout.NORTH);
+		String lean = leanText(p);
+		if (lean != null)
+		{
+			card.add(Ui.wrapped(lean, Theme.small(), Theme.GOLD, WIDTH - 30), BorderLayout.CENTER);
+		}
+		stack.add(card);
+		List<Report.Line> items = new ArrayList<>(report.getGains());
+		items.addAll(report.getLosses());
+		if (!items.isEmpty())
+		{
+			JPanel list = new JPanel(new GridLayout(0, 1, 0, 2));
+			list.setOpaque(false);
+			for (Report.Line l : items)
+			{
+				String name = name(l.getItemId());
+				list.add(new ItemRow(l.getItemId(), name, Format.count(l.getQuantity()), Format.signed(l.getValue()), Theme.signed(l.getValue()),
+					-1, icons, name + ": " + Format.signed(l.getValue()) + " from play over the forecast's days"));
+			}
+			stack.add(list);
+		}
+	}
+
+	/** Says so when one day carries the trend, with the trend without it; null when no day does. */
+	static String leanText(Projection p)
+	{
+		List<Integer> big = p.biggestDays(1);
+		if (big.isEmpty() || p.getDays() < 2)
+		{
+			return null;
+		}
+		long biggest = p.change(big.get(0));
+		double total = p.getDrift() * p.getDays();
+		if (biggest <= 0 || total <= 0 || biggest < total * 0.4)
+		{
+			return null;
+		}
+		long without = Math.round((total - biggest) / (p.getDays() - 1));
+		return "One day carries much of this: without " + Format.day(p.getFrom().plusDays(big.get(0))) + " the trend is "
+			+ Format.signed(without) + " a day.";
+	}
+
+	private static JComponent driverRow(String label, long value, Color color)
+	{
+		JPanel row = new JPanel(new BorderLayout(6, 0));
+		row.setOpaque(false);
+		row.add(Ui.label(label, Theme.small(), Theme.TEXT_MUTED), BorderLayout.CENTER);
+		row.add(Ui.label(Format.signed(value), Theme.small(), color), BorderLayout.EAST);
+		return row;
 	}
 
 	/** The round figures the worth has passed while the ledger watched, newest first, with the time between. */

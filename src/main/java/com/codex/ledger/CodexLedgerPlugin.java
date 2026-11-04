@@ -3,6 +3,7 @@ package com.codex.ledger;
 import com.codex.ledger.core.Alchemy;
 import com.codex.ledger.core.BankCopy;
 import com.codex.ledger.core.Day;
+import com.codex.ledger.core.GearGoalReader;
 import com.codex.ledger.core.Earnings;
 import com.codex.ledger.core.Kind;
 import com.codex.ledger.core.Kinds;
@@ -184,6 +185,8 @@ public class CodexLedgerPlugin extends Plugin
 	private volatile boolean panelBehind;
 	/** Session Chronicle's filed sessions for this account, or empty without it. */
 	private List<Earnings.Logged> chronicle = Collections.emptyList();
+	/** Codex Gear Roadmap's savings goal for this account, read and never written; null when there is none. */
+	private GearGoalReader.Goal gearGoal;
 	/** Codex Bank Steward's copy of the bank for this account, read while the ledger waits for the real one; null without it. */
 	private BankCopy bankCopy;
 	/** The copy priced, and the tick it was priced at; priced again about once a minute while waiting. */
@@ -396,6 +399,19 @@ public class CodexLedgerPlugin extends Plugin
 			}
 			return;
 		}
+		if (GearGoalReader.GROUP.equals(event.getGroup()))
+		{
+			// Gear Roadmap picked or cleared its savings goal: the forecast's target may have moved.
+			if (GearGoalReader.KEY.equals(event.getKey()) && profile != null && profile.equals(event.getProfile()))
+			{
+				clientThread.invokeLater(() ->
+				{
+					gearGoal = GearGoalReader.read(gson, configManager.getRSProfileConfiguration(GearGoalReader.GROUP, GearGoalReader.KEY));
+					publish();
+				});
+			}
+			return;
+		}
 		if (BankCopy.GROUP.equals(event.getGroup()))
 		{
 			// Bank Steward saw the bank: the estimate shown before the ledger begins may have moved.
@@ -413,7 +429,8 @@ public class CodexLedgerPlugin extends Plugin
 		if (CodexLedgerConfig.GROUP.equals(event.getGroup()) && event.getProfile() == null)
 		{
 			plaque.setEnabled(config.showPlaque());
-			if ("goal".equals(event.getKey()) || "goalName".equals(event.getKey()) || "nameOnCard".equals(event.getKey()))
+			if ("goal".equals(event.getKey()) || "goalName".equals(event.getKey()) || "nameOnCard".equals(event.getKey())
+				|| "gearRoadmapGoal".equals(event.getKey()))
 			{
 				clientThread.invokeLater(this::publish);
 			}
@@ -702,6 +719,7 @@ public class CodexLedgerPlugin extends Plugin
 		saver.reset();
 		readChronicle();
 		readBankCopy();
+		gearGoal = GearGoalReader.read(gson, configManager.getRSProfileConfiguration(GearGoalReader.GROUP, GearGoalReader.KEY));
 		unsaved = false;
 		playUnsaved = false;
 		dirty = true;
@@ -825,15 +843,48 @@ public class CodexLedgerPlugin extends Plugin
 		LedgerPanel.State state = !loggedIn ? LedgerPanel.State.LOGGED_OUT : copy.isReady() ? LedgerPanel.State.READY : LedgerPanel.State.WAITING_FOR_BANK;
 		LedgerPanel.Goal goal = new LedgerPanel.Goal(Math.max(0, config.goal()) * 1_000_000L, config.goalName());
 		boolean nameOnCard = config.nameOnCard();
+		LedgerPanel.GearGoal gear = gearGoal(copy);
 		SwingUtilities.invokeLater(() ->
 		{
 			target.setGoal(goal);
+			target.setGearGoal(gear);
 			target.setShowName(nameOnCard);
 			target.setAlchemy(alchemy);
 			target.setEarnings(earnings);
 			target.setEstimate(guess);
 			target.update(copy, shownNames, name, state, now);
 		});
+	}
+
+	/**
+	 * Gear Roadmap's goal priced at today's prices for the pieces the account does not hold, with the
+	 * coins it holds; null without a goal, for ironmen (who cannot buy it), or while a piece has no price.
+	 */
+	private LedgerPanel.GearGoal gearGoal(Ledger copy)
+	{
+		GearGoalReader.Goal g = gearGoal;
+		if (g == null || !config.gearRoadmapGoal() || !copy.isReady() || client.getVarbitValue(VarbitID.IRONMAN) > 0)
+		{
+			return null;
+		}
+		Map<Integer, Long> held = copy.holdings();
+		long price = 0;
+		for (int id : g.getIds())
+		{
+			int canon = itemManager.canonicalize(id);
+			if (held.containsKey(id) || held.containsKey(canon))
+			{
+				continue;
+			}
+			long each = itemManager.getItemPrice(canon);
+			if (each <= 0)
+			{
+				return null;
+			}
+			price += each;
+		}
+		long coins = held.getOrDefault(ItemID.COINS, 0L) + 1_000L * held.getOrDefault(ItemID.PLATINUM, 0L);
+		return new LedgerPanel.GearGoal(g.getName(), price, coins);
 	}
 
 	/** Reads Codex Bank Steward's copy of the bank for this account; never writes it. Null when it is not installed. */
