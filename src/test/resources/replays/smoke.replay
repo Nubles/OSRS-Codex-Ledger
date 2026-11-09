@@ -1,0 +1,75 @@
+# The whole plugin on an ordinary account: started as RuneLite starts it, logged in at Lumbridge,
+# walking, hurt and healed, gaining experience, hearing the game's chat, seeing an NPC and another
+# player, the bank changing, standing still for a minute, hopping worlds, logging out, then
+# turned off, turned on again and logged in once more.
+#
+# Nothing is expected of what it shows: the replay fails if any of the plugin's event handlers,
+# its start or its stop throws. The scene is schematic, not the real map.
+#
+# Facts (RuneLite's gameval ItemID): SHARK "Shark", COINS "Coins", _4DOSEPRAYERRESTORE
+# "Prayer potion(4)", RUNE_SCIMITAR "Rune scimitar". The chat lines are the game's own wording
+# for a kill count and a death.
+
+scene 3200 3200
+skill ATTACK 60
+skill STRENGTH 60
+skill DEFENCE 60
+skill HITPOINTS 60
+skill PRAYER 45
+skill RANGED 60
+skill MAGIC 60
+skill MINING 60
+skill THIEVING 60
+skill SLAYER 50
+skill FARMING 50
+skill WOODCUTTING 60
+item SHARK "Shark" price 800
+item COINS "Coins" price 1 stacks
+item _4DOSEPRAYERRESTORE "Prayer potion(4)" price 9000
+item RUNE_SCIMITAR "Rune scimitar" price 15000
+items INV SHARK 10
+items INV COINS 100000 stacked
+items INV _4DOSEPRAYERRESTORE 4
+items WORN RUNE_SCIMITAR 1
+at 3222 3218
+login
+tick 12
+
+walk 3226 3222
+tick 5
+xp ATTACK 300000
+boost HITPOINTS 20
+tick 3
+boost HITPOINTS 60
+chat GAMEMESSAGE "Your Sarachnis kill count is: 52."
+chat GAMEMESSAGE "Oh dear, you are dead!"
+chat SPAM "You catch some shrimps."
+npc 100 "Goblin" 3227 3223 1 level 5 as goblin
+player "Another player" 3224 3220
+tick 5
+remove goblin
+
+items BANK SHARK 500 stacked
+items BANK COINS 5000000 stacked
+tick 3
+items INV clear
+items INV SHARK 3
+tick 110
+
+# A world hop, as the game sends it.
+state HOPPING
+tick 2
+state LOADING
+tick 1
+state LOGGED_IN
+tick 20
+
+state LOGIN_SCREEN
+tick 3
+
+# Off and on again in the plugin list, then back in.
+shutdown
+startup
+login
+tick 5
+shutdown
