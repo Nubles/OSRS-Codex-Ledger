@@ -5,6 +5,7 @@ import java.awt.Dimension;
 import java.awt.FontMetrics;
 import java.awt.GradientPaint;
 import java.awt.Graphics;
+import java.awt.Shape;
 import java.awt.Graphics2D;
 import java.awt.geom.RoundRectangle2D;
 import java.time.format.DateTimeFormatter;
@@ -77,10 +78,11 @@ class MonthRow extends JComponent
 		g.setPaint(new GradientPaint(0, 0, Theme.CARD_TOP, 0, h, Theme.CARD));
 		g.fill(shape);
 		long change = month.change();
-		g.setClip(shape);
+		Shape clipBefore = g.getClip();
+		g.clip(shape);
 		g.setColor(Theme.signed(change));
 		g.fillRect(0, 0, 3, h);
-		g.setClip(null);
+		g.setClip(clipBefore);
 		g.setColor(month.isCurrent() ? Theme.alpha(Theme.GOLD, 120) : Theme.STROKE_SOFT);
 		g.draw(shape);
 

@@ -1,0 +1,25 @@
+# The price memory the suite reads (codexledger/pricesV1): once the bank has been seen, today's
+# prices of what the account holds are remembered and saved with the ledger, at logout at the
+# latest. JSON quotes cannot be written in a check, so the prices are matched by value.
+#
+# Facts (RuneLite's gameval ItemID): ABYSSAL_WHIP "Abyssal whip", SHARK "Shark", COINS "Coins".
+# The prices are made up. The scene is schematic, not the real map.
+
+scene 3200 3200
+item ABYSSAL_WHIP "Abyssal whip" price 1500000
+item SHARK "Shark" price 800
+item COINS "Coins" price 1 stacks
+items INV SHARK 10
+items INV COINS 100000 stacked
+at 3222 3218
+login
+tick 12
+
+items BANK ABYSSAL_WHIP 1
+items BANK SHARK 500 stacked
+tick 5
+state LOGIN_SCREEN
+tick 2
+expect saved.pricesV1 ~ version
+expect saved.pricesV1 ~ :1500000}
+expect saved.pricesV1 ~ :800,

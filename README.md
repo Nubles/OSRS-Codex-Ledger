@@ -55,8 +55,11 @@ Codex Ledger works on its own. If you also use these, it reads (never writes) wh
 - **[Codex Session Chronicle](https://github.com/Nubles/OSRS-Codex-Session-Chronicle)**: its journal of sessions, so the Worth page can show **What pays**, your activities over the last 30 days ranked by net worth gained an hour played.
 - **[Codex Gear Roadmap](https://github.com/Nubles/OSRS-Codex-Gear-Roadmap)**: its savings goal (`codexgearroadmap.goal`), priced at today's prices for the pieces you do not hold, so the forecast can say when you can afford it. Not for ironmen, who cannot buy it.
 - **[Codex Bank Steward](https://github.com/Nubles/OSRS-Codex-Bank-Steward)**: its saved copy of your bank, so before the ledger has seen your bank it can show an estimate, clearly marked as one. Nothing in it is booked.
+- **[Codex Quartermaster](https://github.com/Nubles/OSRS-Codex-Quartermaster)**: the items in your kits (`codexquartermaster.kitsV1`), so the price memory keeps their prices first.
 
 Codex Annals, Gear Roadmap, Session Chronicle and Guardian read the worth this plugin saves.
+
+**One price memory for the suite.** Each day you play, Codex Ledger remembers the price of every item the Codex plugins care about: the pieces of your Gear Roadmap goal, the items in your Quartermaster kits, then everything you hold, most valuable first (up to 600 items). It keeps 90 days: the last two weeks day by day, older weeks one day each, and the further back it goes the fewer items it keeps, so the whole memory stays under 60 KB. Quartermaster, Money Pilot, Bank Steward, Provisioner and Gear Roadmap read it to tell rising prices from falling ones. It is built only from the prices RuneLite already has, with no extra network calls, and saved per account as `codexledger.pricesV1`.
 
 ### How the forecast is worked out
 
