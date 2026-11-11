@@ -10,6 +10,8 @@ import com.codex.ledger.core.Kind;
 import com.codex.ledger.core.Kinds;
 import com.codex.ledger.core.Ledger;
 import com.codex.ledger.core.Offer;
+import com.codex.ledger.core.Interest;
+import com.codex.ledger.core.PriceMemory;
 import com.codex.ledger.core.Report;
 import com.codex.ledger.core.SafeDeath;
 import com.codex.ledger.core.Saver;
@@ -31,10 +33,12 @@ import java.io.OutputStream;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import javax.imageio.ImageIO;
@@ -119,6 +123,8 @@ public class CodexLedgerPlugin extends Plugin
 	 * written each time, so standing still does not rewrite it every five minutes.
 	 */
 	private static final int PLAY_SAVE_TICKS = 3_000;
+	/** Ticks between remembering the day's prices for the suite, about half an hour. */
+	private static final int PRICE_TICKS = 3_000;
 	/** Ticks between refreshing the panel and plaque while the ledger keeps changing. */
 	private static final int PUBLISH_TICKS = 3;
 	/**
@@ -199,6 +205,14 @@ public class CodexLedgerPlugin extends Plugin
 	private BankCopy.Estimate estimate;
 	private int estimatedAt;
 	private boolean unsaved;
+	/** The price memory every Codex plugin may read (codexledger/pricesV1); null before an account is loaded. */
+	private PriceMemory priceMemory;
+	private boolean pricesUnsaved;
+	/** The day and tick the price memory was last brought up to date. */
+	private LocalDate pricesDay;
+	private int pricesAt;
+	/** Codex Quartermaster's kit items for this account, read and never written; empty without it. */
+	private Set<Integer> kitItems = Collections.emptySet();
 	/** Time logged in counted since the last save, saved with the next change or at the slower pace. */
 	private boolean playUnsaved;
 	private int ticks;
@@ -421,6 +435,15 @@ public class CodexLedgerPlugin extends Plugin
 			}
 			return;
 		}
+		if (Interest.QUARTERMASTER.equals(event.getGroup()))
+		{
+			// Quartermaster saved its kits: the items the price memory keeps may have moved.
+			if (Interest.KITS_KEY.equals(event.getKey()) && profile != null && profile.equals(event.getProfile()))
+			{
+				clientThread.invokeLater(this::readKits);
+			}
+			return;
+		}
 		if (BankCopy.GROUP.equals(event.getGroup()))
 		{
 			// Bank Steward saw the bank: the estimate shown before the ledger begins may have moved.
@@ -568,12 +591,17 @@ public class CodexLedgerPlugin extends Plugin
 				dirty = true;
 			}
 		}
+		if (ledger.isReady() && (pricesDay == null || ticks - pricesAt >= PRICE_TICKS
+			|| !pricesDay.equals(LocalDate.now(ZoneId.systemDefault()))))
+		{
+			rememberPrices();
+		}
 		if (summaryDue && loggedInTicks >= SUMMARY_TICKS)
 		{
 			summaryDue = false;
 			summary();
 		}
-		if ((unsaved || flipsUnsaved) && ticks % SAVE_TICKS == 0 || playUnsaved && ticks % PLAY_SAVE_TICKS == 0)
+		if ((unsaved || flipsUnsaved || pricesUnsaved) && ticks % SAVE_TICKS == 0 || playUnsaved && ticks % PLAY_SAVE_TICKS == 0)
 		{
 			save();
 		}
@@ -728,6 +756,10 @@ public class CodexLedgerPlugin extends Plugin
 		bankCopy = null;
 		estimate = null;
 		magicLevel = 0;
+		priceMemory = null;
+		pricesUnsaved = false;
+		pricesDay = null;
+		kitItems = Collections.emptySet();
 		if (profile == null)
 		{
 			return;
@@ -752,6 +784,13 @@ public class CodexLedgerPlugin extends Plugin
 		}
 		ledger.setKinds(this::kind);
 		loadFlips();
+		priceMemory = PriceMemory.read(gson, configManager.getRSProfileConfiguration(CodexLedgerConfig.GROUP, PriceMemory.KEY));
+		if (priceMemory == null)
+		{
+			// None yet, or one this version cannot read: a new memory starts; prices are only a cache of the client's own.
+			priceMemory = new PriceMemory();
+		}
+		readKits();
 		saver.reset();
 		readChronicle();
 		readBankCopy();
@@ -781,6 +820,22 @@ public class CodexLedgerPlugin extends Plugin
 		}
 	}
 
+	/**
+	 * Writes a key other Codex plugins read to this account's profile. Written the way they read it
+	 * while this account is the one RuneLite has open; during a switch, to the account it belongs to.
+	 */
+	private void share(String key, String json)
+	{
+		if (profile.equals(configManager.getRSProfileKey()))
+		{
+			configManager.setRSProfileConfiguration(CodexLedgerConfig.GROUP, key, json);
+		}
+		else
+		{
+			configManager.setConfiguration(CodexLedgerConfig.GROUP, profile, key, json);
+		}
+	}
+
 	/** Writes the ledger to the profile if it changed, time logged in included, and says whether it did. */
 	private boolean save()
 	{
@@ -789,6 +844,12 @@ public class CodexLedgerPlugin extends Plugin
 		{
 			flipsUnsaved = false;
 			configManager.setConfiguration(CodexLedgerConfig.GROUP, profile, FLIPS_KEY, gson.toJson(flips));
+			wrote = true;
+		}
+		if (profile != null && priceMemory != null && pricesUnsaved)
+		{
+			pricesUnsaved = false;
+			share(PriceMemory.KEY, priceMemory.write(gson, System.currentTimeMillis()));
 			wrote = true;
 		}
 		if (profile == null || ledger == null || !unsaved && !playUnsaved)
@@ -959,6 +1020,56 @@ public class CodexLedgerPlugin extends Plugin
 		}
 		long coins = held.getOrDefault(ItemID.COINS, 0L) + 1_000L * held.getOrDefault(ItemID.PLATINUM, 0L);
 		return new LedgerPanel.GearGoal(g.getName(), price, coins);
+	}
+
+	/**
+	 * Brings today's page of the price memory up to date with RuneLite's own prices for the items
+	 * the suite cares about, and thins it to what is kept. Run about every half hour and when the
+	 * day turns; written with the next save.
+	 */
+	private void rememberPrices()
+	{
+		LocalDate today = LocalDate.now(ZoneId.systemDefault());
+		pricesDay = today;
+		pricesAt = ticks;
+		if (priceMemory == null || ledger == null)
+		{
+			return;
+		}
+		List<Integer> goals = new ArrayList<>();
+		if (gearGoal != null)
+		{
+			for (int id : gearGoal.getIds())
+			{
+				goals.add(itemManager.canonicalize(id));
+			}
+		}
+		List<Integer> ranked = Interest.rank(goals, kitItems, Collections.emptyList(), ledger.holdings(), ledger::price,
+			new ArrayList<>(ledger.getBook().keySet()));
+		Map<Integer, Long> priced = new HashMap<>();
+		for (int id : ranked)
+		{
+			if (priced.size() >= PriceMemory.MAX_IDS)
+			{
+				break;
+			}
+			long price = itemManager.getItemPrice(id);
+			if (price > 0)
+			{
+				priced.put(id, price);
+			}
+		}
+		int before = priceMemory.getDays().size();
+		boolean changed = priceMemory.record(today, ranked, priced);
+		priceMemory.trim(today, ranked);
+		pricesUnsaved |= changed || priceMemory.getDays().size() != before;
+	}
+
+	/** Reads Codex Quartermaster's kits for this account; never writes them. Empty when it is not installed. */
+	private void readKits()
+	{
+		kitItems = profile == null ? Collections.emptySet()
+			: Interest.kitItems(gson, configManager.getRSProfileConfiguration(Interest.QUARTERMASTER, Interest.KITS_KEY));
 	}
 
 	/** Reads Codex Bank Steward's copy of the bank for this account; never writes it. Null when it is not installed. */
