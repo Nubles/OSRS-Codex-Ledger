@@ -6,6 +6,7 @@ import java.awt.Dimension;
 import java.awt.FontMetrics;
 import java.awt.GradientPaint;
 import java.awt.Graphics;
+import java.awt.Shape;
 import java.awt.Graphics2D;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.RoundRectangle2D;
@@ -68,7 +69,8 @@ class StoreBreakdown extends JComponent
 		RoundRectangle2D track = new RoundRectangle2D.Float(0, 0, w, BAR, BAR, BAR);
 		g.setColor(Theme.INK_DEEP);
 		g.fill(track);
-		g.setClip(track);
+		Shape clipBefore = g.getClip();
+		g.clip(track);
 		float x = 0;
 		for (Part p : parts)
 		{
@@ -84,7 +86,7 @@ class StoreBreakdown extends JComponent
 			g.drawLine(Math.round(x + pw), 0, Math.round(x + pw), BAR);
 			x += pw;
 		}
-		g.setClip(null);
+		g.setClip(clipBefore);
 		g.setColor(Theme.alpha(Theme.GOLD, 90));
 		g.draw(new RoundRectangle2D.Float(0.5f, 0.5f, w - 1, BAR - 1, BAR, BAR));
 

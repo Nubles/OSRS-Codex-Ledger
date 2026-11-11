@@ -6,6 +6,7 @@ import java.awt.Dimension;
 import java.awt.FontMetrics;
 import java.awt.GradientPaint;
 import java.awt.Graphics;
+import java.awt.Shape;
 import java.awt.Graphics2D;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -72,10 +73,11 @@ class DayRow extends JComponent
 		g.setPaint(new GradientPaint(0, 0, hover ? Theme.CARD_HOVER : Theme.CARD_TOP, 0, h, Theme.CARD));
 		g.fill(shape);
 		long change = day.change();
-		g.setClip(shape);
+		Shape clipBefore = g.getClip();
+		g.clip(shape);
 		g.setColor(Theme.signed(change));
 		g.fillRect(0, 0, 3, h);
-		g.setClip(null);
+		g.setClip(clipBefore);
 		g.setColor(selected ? Theme.alpha(Theme.GOLD, 160) : hover ? Theme.alpha(Theme.GOLD, 90) : Theme.STROKE_SOFT);
 		g.draw(shape);
 

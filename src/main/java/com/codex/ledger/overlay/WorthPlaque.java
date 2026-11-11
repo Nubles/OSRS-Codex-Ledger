@@ -37,13 +37,27 @@ public class WorthPlaque extends Overlay
 	}
 
 	@Override
-	public Dimension render(Graphics2D g)
+	public Dimension render(Graphics2D graphics)
 	{
 		long[] v = view;
 		if (!enabled || v == null)
 		{
 			return null;
 		}
+		// Drawn on a copy, so the overlay renderer's clip, font, paint and hints are left as they were.
+		Graphics2D g = (Graphics2D) graphics.create();
+		try
+		{
+			return paint(g, v);
+		}
+		finally
+		{
+			g.dispose();
+		}
+	}
+
+	private static Dimension paint(Graphics2D g, long[] v)
+	{
 		Theme.smooth(g);
 		String worth = Format.coins(v[0]);
 		String today = Format.signed(v[1]) + " today";
